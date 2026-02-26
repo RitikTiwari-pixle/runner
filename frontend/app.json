@@ -1,0 +1,70 @@
+{
+    "expo": {
+        "name": "Territory Runner",
+        "slug": "territory-runner",
+        "version": "1.0.0",
+        "orientation": "portrait",
+        "icon": "./assets/icon.png",
+        "userInterfaceStyle": "dark",
+        "splash": {
+            "image": "./assets/splash.png",
+            "resizeMode": "contain",
+            "backgroundColor": "#0A0A0A"
+        },
+        "ios": {
+            "supportsTablet": false,
+            "bundleIdentifier": "com.territoryrunner.app",
+            "config": {
+                "googleMapsApiKey": "AIzaSyC8two01DHpY4iU0uK6GKmWMaqCf5_j-uw"
+            },
+            "infoPlist": {
+                "NSLocationWhenInUseUsageDescription": "Territory Runner needs your location to track your run route on the map.",
+                "NSLocationAlwaysAndWhenInUseUsageDescription": "Territory Runner needs background location access to keep tracking your run even when you switch apps or lock your screen.",
+                "NSLocationAlwaysUsageDescription": "Territory Runner needs background location access to keep tracking your run even when you switch apps or lock your screen.",
+                "UIBackgroundModes": [
+                    "location",
+                    "fetch"
+                ]
+            }
+        },
+        "android": {
+            "adaptiveIcon": {
+                "foregroundImage": "./assets/adaptive-icon.png",
+                "backgroundColor": "#0A0A0A"
+            },
+            "package": "com.territoryrunner.app",
+            "config": {
+                "googleMaps": {
+                    "apiKey": "AIzaSyC8two01DHpY4iU0uK6GKmWMaqCf5_j-uw"
+                }
+            },
+            "permissions": [
+                "ACCESS_FINE_LOCATION",
+                "ACCESS_COARSE_LOCATION",
+                "ACCESS_BACKGROUND_LOCATION",
+                "FOREGROUND_SERVICE",
+                "FOREGROUND_SERVICE_LOCATION",
+                "WAKE_LOCK",
+                "RECEIVE_BOOT_COMPLETED"
+            ]
+        },
+        "plugins": [
+            [
+                "expo-location",
+                {
+                    "locationAlwaysAndWhenInUsePermission": "Territory Runner needs background location access to keep tracking your run even when you switch apps or lock your screen.",
+                    "isAndroidBackgroundLocationEnabled": true,
+                    "isAndroidForegroundServiceEnabled": true
+                }
+            ],
+            [
+                "expo-notifications",
+                {
+                    "icon": "./assets/notification-icon.png",
+                    "color": "#00FF88"
+                }
+            ]
+        ],
+        "sdkVersion": "54.0.0"
+    }
+}

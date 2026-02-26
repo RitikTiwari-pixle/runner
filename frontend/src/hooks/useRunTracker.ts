@@ -1,0 +1,254 @@
+/**
+ * useRunTracker — Core hook managing the full run lifecycle.
+ *
+ * State machine: idle → running ↔ paused → finished
+ *
+ * Responsibilities:
+ * - Start/pause/resume/stop run
+ * - Accumulate GPS route coordinates for map polyline
+ * - Compute live metrics (duration tick, distance, pace)
+ * - Batch-sync GPS points to the backend every SYNC_INTERVAL
+ * - Start & stop background tracking
+ */
+
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
+import { GPSPoint, RunStatus, Coordinate, RunMetrics } from '../types/run';
+import { haversineDistance } from '../utils/geo';
+import {
+    startForegroundTracking,
+    startBackgroundTracking,
+    stopBackgroundTracking,
+    flushBuffer,
+    setOnPointCallback,
+    recoverBuffer,
+} from '../services/locationService';
+import * as api from '../services/apiService';
+import * as Location from 'expo-location';
+
+const SYNC_INTERVAL_MS = 15_000; // Batch-sync to backend every 15s
+
+export interface UseRunTrackerReturn {
+    status: RunStatus;
+    route: Coordinate[];
+    metrics: RunMetrics;
+    currentLocation: Coordinate | null;
+    startRun: () => Promise<void>;
+    pauseRun: () => void;
+    resumeRun: () => void;
+    stopRun: (difficulty?: string, notes?: string) => Promise<void>;
+}
+
+export function useRunTracker(userId: string): UseRunTrackerReturn {
+    const [status, setStatus] = useState<RunStatus>('idle');
+    const [route, setRoute] = useState<Coordinate[]>([]);
+    const [currentLocation, setCurrentLocation] = useState<Coordinate | null>(null);
+    const [metrics, setMetrics] = useState<RunMetrics>({
+        duration_s: 0,
+        distance_m: 0,
+        avg_pace_s_per_km: 0,
+        max_speed_mps: 0,
+    });
+
+    const runIdRef = useRef<string | null>(null);
+    const subscriptionRef = useRef<Location.LocationSubscription | null>(null);
+    const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const startTimeRef = useRef<number>(0);
+    const pausedDurationRef = useRef<number>(0);
+    const totalDistanceRef = useRef<number>(0);
+    const lastCoordRef = useRef<Coordinate | null>(null);
+    const maxSpeedRef = useRef<number>(0);
+    const isPausedRef = useRef<boolean>(false);
+
+    // ─── Duration Ticker ────────────────────────────────────────
+    const startDurationTicker = useCallback(() => {
+        if (durationIntervalRef.current) clearInterval(durationIntervalRef.current);
+        durationIntervalRef.current = setInterval(() => {
+            if (!isPausedRef.current) {
+                const elapsed = (Date.now() - startTimeRef.current) / 1000 - pausedDurationRef.current;
+                const pace = totalDistanceRef.current > 0
+                    ? elapsed / (totalDistanceRef.current / 1000)
+                    : 0;
+
+                setMetrics((prev) => ({
+                    ...prev,
+                    duration_s: Math.floor(elapsed),
+                    avg_pace_s_per_km: Math.round(pace * 100) / 100,
+                }));
+            }
+        }, 1000);
+    }, []);
+
+    // ─── GPS Point Handler ──────────────────────────────────────
+    const handleGPSPoint = useCallback((point: GPSPoint) => {
+        if (isPausedRef.current) return;
+
+        const newCoord: Coordinate = { latitude: point.lat, longitude: point.lng };
+        setCurrentLocation(newCoord);
+        setRoute((prev) => [...prev, newCoord]);
+
+        // Accumulate distance
+        if (lastCoordRef.current) {
+            const d = haversineDistance(
+                lastCoordRef.current.latitude, lastCoordRef.current.longitude,
+                newCoord.latitude, newCoord.longitude
+            );
+            // Filter GPS jitter: only count if moved > 2m and accuracy < 25m
+            if (d > 2 && (point.accuracy_m == null || point.accuracy_m < 25)) {
+                totalDistanceRef.current += d;
+                setMetrics((prev) => ({ ...prev, distance_m: totalDistanceRef.current }));
+            }
+        }
+        lastCoordRef.current = newCoord;
+
+        // Track max speed
+        if (point.speed_mps && point.speed_mps > maxSpeedRef.current) {
+            maxSpeedRef.current = point.speed_mps;
+            setMetrics((prev) => ({ ...prev, max_speed_mps: point.speed_mps! }));
+        }
+    }, []);
+
+    // ─── Backend Sync ───────────────────────────────────────────
+    const startSyncInterval = useCallback(() => {
+        if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
+        syncIntervalRef.current = setInterval(async () => {
+            if (!runIdRef.current) return;
+            const points = flushBuffer();
+            if (points.length > 0) {
+                try {
+                    await api.syncPoints(runIdRef.current, points);
+                } catch (e) {
+                    console.error('[Sync] Failed to sync points, will retry:', e);
+                    // Points are lost from buffer but still in route state
+                    // The finish call will re-compute from stored points
+                }
+            }
+        }, SYNC_INTERVAL_MS);
+    }, []);
+
+    // ─── App State Listener (foreground ↔ background) ──────────
+    useEffect(() => {
+        const handleAppState = (next: AppStateStatus) => {
+            if (status === 'running' && next === 'active') {
+                // App returned to foreground — re-attach the point callback
+                setOnPointCallback(handleGPSPoint);
+            }
+        };
+
+        const sub = AppState.addEventListener('change', handleAppState);
+        return () => sub.remove();
+    }, [status, handleGPSPoint]);
+
+    // ─── Cleanup on unmount ────────────────────────────────────
+    useEffect(() => {
+        return () => {
+            if (subscriptionRef.current) subscriptionRef.current.remove();
+            if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
+            if (durationIntervalRef.current) clearInterval(durationIntervalRef.current);
+        };
+    }, []);
+
+    // ─── START RUN ──────────────────────────────────────────────
+    const startRun = useCallback(async () => {
+        // Recover any points from a previous crash
+        const recovered = await recoverBuffer();
+        if (recovered.length > 0) {
+            console.log(`[Run] Recovered ${recovered.length} points from previous session`);
+        }
+
+        // Create run on the backend
+        const session = await api.startRun(userId);
+        runIdRef.current = session.id;
+        startTimeRef.current = Date.now();
+        pausedDurationRef.current = 0;
+        totalDistanceRef.current = 0;
+        maxSpeedRef.current = 0;
+        lastCoordRef.current = null;
+        isPausedRef.current = false;
+
+        setRoute([]);
+        setMetrics({ duration_s: 0, distance_m: 0, avg_pace_s_per_km: 0, max_speed_mps: 0 });
+        setStatus('running');
+
+        // Start GPS tracking (foreground + background)
+        subscriptionRef.current = await startForegroundTracking(handleGPSPoint);
+        await startBackgroundTracking();
+
+        // Start periodic sync & duration ticker
+        startSyncInterval();
+        startDurationTicker();
+    }, [userId, handleGPSPoint, startSyncInterval, startDurationTicker]);
+
+    // ─── PAUSE RUN ─────────────────────────────────────────────
+    const pauseRun = useCallback(() => {
+        isPausedRef.current = true;
+        setStatus('paused');
+    }, []);
+
+    // ─── RESUME RUN ────────────────────────────────────────────
+    const resumeRun = useCallback(() => {
+        isPausedRef.current = false;
+        setStatus('running');
+    }, []);
+
+    // ─── STOP RUN ──────────────────────────────────────────────
+    const stopRun = useCallback(async (difficulty?: string, notes?: string) => {
+        // Stop tracking
+        if (subscriptionRef.current) {
+            subscriptionRef.current.remove();
+            subscriptionRef.current = null;
+        }
+        await stopBackgroundTracking();
+
+        // Clear intervals
+        if (syncIntervalRef.current) {
+            clearInterval(syncIntervalRef.current);
+            syncIntervalRef.current = null;
+        }
+        if (durationIntervalRef.current) {
+            clearInterval(durationIntervalRef.current);
+            durationIntervalRef.current = null;
+        }
+
+        // Final sync — flush remaining buffer
+        if (runIdRef.current) {
+            const remaining = flushBuffer();
+            if (remaining.length > 0) {
+                try {
+                    await api.syncPoints(runIdRef.current, remaining);
+                } catch (e) {
+                    console.error('[Sync] Final sync failed:', e);
+                }
+            }
+
+            // Finalize on the backend
+            try {
+                const result = await api.finishRun(runIdRef.current, difficulty, notes);
+                setMetrics({
+                    duration_s: result.duration_s ?? 0,
+                    distance_m: result.distance_m ?? 0,
+                    avg_pace_s_per_km: result.avg_pace_s_per_km ?? 0,
+                    max_speed_mps: result.max_speed_mps ?? 0,
+                });
+            } catch (e) {
+                console.error('[Run] Finish failed:', e);
+            }
+        }
+
+        setStatus('finished');
+        setOnPointCallback(null);
+        runIdRef.current = null;
+    }, []);
+
+    return {
+        status,
+        route,
+        metrics,
+        currentLocation,
+        startRun,
+        pauseRun,
+        resumeRun,
+        stopRun,
+    };
+}

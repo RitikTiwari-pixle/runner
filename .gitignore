@@ -1,0 +1,48 @@
+# ─── Python ──────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# ─── Node / Expo ─────────────────────────
+node_modules/
+.expo/
+npm-debug.log*
+yarn-error.log*
+
+# ─── Environment ─────────────────────────
+.env
+.env.local
+.env.production
+
+# ─── Secrets ─────────────────────────────
+credentials.json
+google-services.json
+GoogleService-Info.plist
+*.keystore
+*.jks
+
+# ─── IDE ─────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ─── OS ──────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ─── Docker ──────────────────────────────
+docker-compose.override.yml
+
+# ─── Build artifacts ─────────────────────
+*.apk
+*.aab
+*.ipa
+ios/build/
+android/build/
+android/app/build/
