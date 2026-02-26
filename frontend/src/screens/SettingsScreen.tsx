@@ -2,58 +2,15 @@
  * SettingsScreen — User settings, device connections, and app info.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
     View, Text, ScrollView, StyleSheet, TouchableOpacity,
     Alert, Switch,
 } from 'react-native';
-import { getIntegrationStatus, disconnectProvider } from '../services/apiService';
-import { getUserId, clearAuthState } from '../services/authService';
-
-const PROVIDERS = [
-    { key: 'strava', label: 'Strava', icon: '🟧', color: '#FC4C02' },
-    { key: 'garmin', label: 'Garmin', icon: '🟢', color: '#00B4D8' },
-    { key: 'coros', label: 'Coros', icon: '🔵', color: '#0066CC' },
-];
+import { clearAuthState } from '../services/authService';
 
 export default function SettingsScreen({ onLogout }: { onLogout?: () => void }) {
-    const [connections, setConnections] = useState<Record<string, boolean>>({});
     const [loading, setLoading] = useState(true);
-
-    const loadConnections = async () => {
-        const myId = getUserId();
-        if (!myId) return;
-        try {
-            const statuses = await getIntegrationStatus(myId);
-            const map: Record<string, boolean> = {};
-            statuses.forEach((s: any) => { map[s.provider] = s.connected; });
-            setConnections(map);
-        } catch (e) {
-            console.error('[Settings] Load connections failed:', e);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    useEffect(() => { loadConnections(); }, []);
-
-    const handleDisconnect = (provider: string) => {
-        Alert.alert(
-            'Disconnect',
-            `Are you sure you want to disconnect ${provider}?`,
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Disconnect', style: 'destructive',
-                    onPress: async () => {
-                        const myId = getUserId()!;
-                        await disconnectProvider(myId, provider);
-                        setConnections({ ...connections, [provider]: false });
-                    },
-                },
-            ],
-        );
-    };
 
     const handleLogout = () => {
         Alert.alert('Log Out', 'Are you sure you want to log out?', [
