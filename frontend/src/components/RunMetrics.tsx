@@ -7,12 +7,16 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { RunMetrics as RunMetricsType } from '../types/run';
 import { formatDuration, formatDistance, formatPace } from '../utils/geo';
+import { useGlobalSettings } from '../context/GlobalSettingsContext';
+import { convertDistance } from '../utils/distanceUnits';
 
 interface Props {
     metrics: RunMetricsType;
 }
 
 export default function RunMetrics({ metrics }: Props) {
+    const { settings } = useGlobalSettings();
+
     return (
         <View style={styles.container}>
             <View style={styles.metricCard}>
@@ -23,7 +27,7 @@ export default function RunMetrics({ metrics }: Props) {
             <View style={styles.divider} />
 
             <View style={styles.metricCard}>
-                <Text style={styles.value}>{formatDistance(metrics.distance_m)}</Text>
+                <Text style={styles.value}>{convertDistance(metrics.distance_m, settings.distanceUnit)}</Text>
                 <Text style={styles.label}>DISTANCE</Text>
             </View>
 

@@ -4,6 +4,12 @@
  * via the Geolocation API prompt.
  */
 
+export interface PermissionStatus {
+    locationForeground: boolean;
+    locationBackground: boolean;
+    notifications: boolean;
+}
+
 export async function requestLocationPermissions(): Promise<boolean> {
     if (typeof navigator !== 'undefined' && navigator.geolocation) {
         return new Promise((resolve) => {
@@ -33,4 +39,22 @@ export async function checkLocationPermissions(): Promise<{
         }
     }
     return { foreground: false, background: false };
+}
+
+export async function requestNotificationPermissions(): Promise<boolean> {
+    return true;
+}
+
+export async function checkNotificationPermissions(): Promise<boolean> {
+    return true;
+}
+
+export async function checkAllPermissions(): Promise<PermissionStatus> {
+    const location = await checkLocationPermissions();
+    const notifications = await checkNotificationPermissions();
+    return {
+        locationForeground: location.foreground,
+        locationBackground: location.background,
+        notifications,
+    };
 }

@@ -23,6 +23,7 @@ LEADERBOARDS:
 """
 
 from pydantic import BaseModel
+from pydantic import Field
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,6 +41,7 @@ class ProfileUpdate(BaseModel):
     city: str | None = None
     state: str | None = None
     phone: str | None = None
+    territory_color: str | None = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
 
 
 class FollowRequest(BaseModel):

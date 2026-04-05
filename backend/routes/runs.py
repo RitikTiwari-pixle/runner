@@ -85,7 +85,7 @@ async def start_run(req: StartRunRequest, db: AsyncSession = Depends(get_db)):
         user_id=str(run.user_id),
         started_at=run.started_at,
         is_valid=run.is_valid,
-        source=run.source,
+        source=getattr(run, "source", "app") or "app",
     )
 
 
@@ -115,6 +115,12 @@ async def finish_run(run_id: str, req: FinishRunRequest, db: AsyncSession = Depe
         cheat_result = await anticheat_service.validate_run(db, run_id)
         if not cheat_result["is_valid"]:
             run = await run_service.get_run(db, run_id)
+            raise HTTPException(
+                status_code=400,
+                detail="Speed too high. Vehicles are not allowed!"
+            )
+    except HTTPException:
+        raise
     except Exception as e:
         log.error(f"Anti-cheat failed: {e}")
 
@@ -184,7 +190,7 @@ async def finish_run(run_id: str, req: FinishRunRequest, db: AsyncSession = Depe
         avg_pace_s_per_km=run.avg_pace_s_per_km,
         max_speed_mps=run.max_speed_mps,
         is_valid=run.is_valid,
-        source=run.source,
+        source=getattr(run, "source", "app") or "app",
         territories_captured=territory_result.get("territories_captured", 0),
         territory_area_sqm=territory_result.get("total_area_sqm", 0),
         territories_stolen=territory_result.get("territories_stolen", 0),
@@ -216,6 +222,21 @@ async def get_run(run_id: str, db: AsyncSession = Depends(get_db)):
     )
 
 
+class ReportRunRequest(BaseModel):
+    reason: str = "suspicious_activity"
+
+
+@router.post("/{run_id}/report", status_code=200)
+async def report_run(run_id: str, req: ReportRunRequest = ReportRunRequest(), db: AsyncSession = Depends(get_db)):
+    """Community report a suspicious run for admin review."""
+    from sqlalchemy import text
+    await db.execute(
+        text("UPDATE runs SET cheat_flags = COALESCE(cheat_flags, 0) + 1 WHERE id = :run_id"),
+        {"run_id": run_id}
+    )
+    return {"status": "reported", "run_id": run_id}
+
+
 @router.get("/user/{user_id}", response_model=list[RunResponse])
 async def get_user_runs(user_id: str, limit: int = 20, offset: int = 0, db: AsyncSession = Depends(get_db)):
     """Get a user's run history, most recent first."""
@@ -231,7 +252,7 @@ async def get_user_runs(user_id: str, limit: int = 20, offset: int = 0, db: Asyn
             avg_pace_s_per_km=r.avg_pace_s_per_km,
             max_speed_mps=r.max_speed_mps,
             is_valid=r.is_valid,
-            source=r.source,
+            source=getattr(r, "source", "app") or "app",
         )
         for r in runs
     ]

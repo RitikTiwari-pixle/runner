@@ -15,6 +15,7 @@ import {
     startBackgroundTracking,
     stopBackgroundTracking,
     flushBuffer,
+    clearBuffer,
     setOnPointCallback,
     recoverBuffer,
 } from '../services/locationService';
@@ -109,8 +110,11 @@ export function useRunTracker(userId: string): UseRunTrackerReturn {
             if (points.length > 0) {
                 try {
                     await api.syncPoints(runIdRef.current, points);
+                    clearBuffer(); // Only clear after successful sync
+                    console.log(`[Sync] Successfully synced ${points.length} points`);
                 } catch (e) {
-                    console.error('[Sync] Failed to sync points, will retry:', e);
+                    console.error('[Sync] Failed to sync points, will retry next interval:', e);
+                    // Points remain in buffer for retry
                 }
             }
         }, SYNC_INTERVAL_MS);
@@ -139,6 +143,28 @@ export function useRunTracker(userId: string): UseRunTrackerReturn {
 
     // ─── START RUN ──────────────────────────────────────────────
     const startRun = useCallback(async () => {
+        // Request browser geolocation permission before starting
+        if (typeof navigator !== 'undefined' && navigator.geolocation) {
+            try {
+                await new Promise<void>((resolve, reject) => {
+                    navigator.geolocation.getCurrentPosition(
+                        () => resolve(),
+                        (error) => {
+                            if (error.code === 1) { // PERMISSION_DENIED
+                                reject(new Error('Location permission denied. Please enable geolocation in browser settings.'));
+                            } else {
+                                resolve(); // Other errors not critical
+                            }
+                        },
+                        { timeout: 2000 }
+                    );
+                });
+            } catch (permErr) {
+                console.error('[Web Run] Permission denied:', permErr);
+                throw permErr;
+            }
+        }
+
         const recovered = await recoverBuffer();
         if (recovered.length > 0) {
             console.log(`[Run] Recovered ${recovered.length} points from previous session`);

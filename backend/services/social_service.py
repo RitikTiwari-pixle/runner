@@ -53,8 +53,10 @@ async def get_profile(db: AsyncSession, user_id: str) -> dict | None:
     return {
         "id": str(user.id),
         "username": user.username,
+        "email_verified": user.email_verified,
         "display_name": user.display_name,
         "avatar_url": user.avatar_url,
+        "territory_color": user.territory_color,
         "city": user.city,
         "state": user.state,
         "country": user.country,
@@ -77,7 +79,7 @@ async def update_profile(db: AsyncSession, user_id: str, updates: dict) -> dict:
     result = await db.execute(select(User).where(User.id == user_uuid))
     user = result.scalar_one()
 
-    allowed_fields = {"display_name", "avatar_url", "city", "state", "phone"}
+    allowed_fields = {"display_name", "avatar_url", "city", "state", "phone", "territory_color"}
     for field, value in updates.items():
         if field in allowed_fields and value is not None:
             setattr(user, field, value)

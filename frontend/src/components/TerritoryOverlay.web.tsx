@@ -15,6 +15,7 @@ interface TerritoryData {
 interface Props {
     territories: TerritoryData[];
     currentUserId: string;
+    ownTerritoryColor?: string;
 }
 
 export default function TerritoryOverlay(_props: Props) {

@@ -20,12 +20,15 @@ let _token: string | null = null;
 export async function loadAuthState(): Promise<{
     userId: string | null;
     token: string | null;
+    error?: Error;
 }> {
     try {
         _userId = await AsyncStorage.getItem(STORAGE_KEYS.USER_ID);
         _token = await AsyncStorage.getItem(STORAGE_KEYS.TOKEN);
     } catch (e) {
-        console.warn('[Auth] Failed to load auth state:', e);
+        const error = e instanceof Error ? e : new Error(String(e));
+        console.error('[Auth] Failed to load auth state:', error);
+        return { userId: null, token: null, error };
     }
     return { userId: _userId, token: _token };
 }

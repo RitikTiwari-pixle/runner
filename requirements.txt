@@ -1,1 +1,35 @@
-python-dotenv>=1.0.0
+# ─── Core Framework ──────────────────────
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+gunicorn>=22.0.0
+python-dotenv>=1.0.1
+pydantic>=2.8.0
+pydantic-settings>=2.1.0
+
+# ─── Database ────────────────────────────
+sqlalchemy[asyncio]>=2.0.32
+asyncpg>=0.29.0
+geoalchemy2>=0.15.1
+
+# ─── Geospatial ──────────────────────────
+shapely>=2.0.5
+
+# ─── Authentication (Local & JWT) ─────────
+passlib[bcrypt]>=1.7.4
+PyJWT>=2.12.1
+python-multipart>=0.0.12
+
+# ─── Firebase ────────────────────────────
+firebase-admin>=6.6.0
+pyasn1>=0.6.3
+
+# ─── HTTP Client ─────────────────────────
+httpx>=0.28.0
+requests>=2.33.0
+
+# ─── Auth (OAuth) ───────────────────────
+authlib>=1.6.9
+
+# ─── TLS / Cryptography ─────────────────
+cryptography>=46.0.6
+

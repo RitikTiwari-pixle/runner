@@ -27,7 +27,7 @@ new runner, and disputes are created for notifications.
 import uuid
 import math
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from geoalchemy2.shape import from_shape, to_shape
@@ -46,6 +46,9 @@ MIN_POINTS_FOR_POLYGON = 10    # Minimum GPS points to form a valid polygon
 MIN_AREA_SQM = 100             # Ignore tiny polygons (GPS noise)
 STRAIGHT_LINE_BUFFER_M = 5     # Buffer width for out-and-back routes (meters)
 EARTH_RADIUS_M = 6_371_000
+REPLAY_DETECTION_HOURS = 24    # Check for replays within 24 hours
+REPLAY_PENALTY_MULTIPLIER = 0.2  # Reduce area to 20% if replay detected
+REPLAY_DISTANCE_THRESHOLD_M = 500  # Centroid must be within 500m to count as replay
 
 
 # ─── Haversine Distance ─────────────────────────────────────────
@@ -317,6 +320,80 @@ async def steal_territory(
 
 
 # ═══════════════════════════════════════════════════════════════
+# ANTI-CHEAT: TERRITORY REPLAY DETECTION
+# ═══════════════════════════════════════════════════════════════
+
+async def check_territory_replay(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    polygon: Polygon,
+) -> dict:
+    """
+    Detect if user is replaying the same territory capture within 24h.
+    
+    Returns:
+    {
+        "is_replay": bool,
+        "penalty_multiplier": float (1.0 = no penalty, 0.2 = 80% reduction),
+        "reason": str,
+    }
+    """
+    # Get centroid of the new polygon
+    new_centroid = polygon.centroid
+    new_point = Point(new_centroid.x, new_centroid.y)
+    new_geom = from_shape(new_point.buffer(0.004, resolution=1), srid=4326)  # ~500m buffer
+
+    # Find user's territories captured in last 24 hours near this location
+    recent_cutoff = datetime.now(timezone.utc) - timedelta(hours=REPLAY_DETECTION_HOURS)
+    
+    result = await db.execute(
+        select(Territory)
+        .where(
+            and_(
+                Territory.owner_id == user_id,
+                Territory.captured_at > recent_cutoff,
+                geo_func.ST_DWithin(Territory.polygon, new_geom, 500),  # 500m buffer
+            )
+        )
+        .order_by(Territory.captured_at.desc())
+        .limit(5)
+    )
+    recent_territories = result.scalars().all()
+
+    if not recent_territories:
+        return {
+            "is_replay": False,
+            "penalty_multiplier": 1.0,
+            "reason": None,
+        }
+
+    # Check if any recent territory has similar characteristics
+    for existing_terr in recent_territories:
+        existing_poly = to_shape(existing_terr.polygon)
+        existing_area = compute_area_sqm(existing_poly)
+        new_area = compute_area_sqm(polygon)
+        
+        # If area is within 20% and location is same, it's likely a replay
+        area_diff_pct = abs(new_area - existing_area) / max(existing_area, new_area) * 100
+        if area_diff_pct < 20:
+            logger.warning(
+                f"[Territory] Replay detected for user {user_id}: "
+                f"{existing_area:.0f} sqm → {new_area:.0f} sqm within {REPLAY_DETECTION_HOURS}h"
+            )
+            return {
+                "is_replay": True,
+                "penalty_multiplier": REPLAY_PENALTY_MULTIPLIER,
+                "reason": "Territory too similar to recent capture (likely replay/gaming)",
+            }
+
+    return {
+        "is_replay": False,
+        "penalty_multiplier": 1.0,
+        "reason": None,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
 # MAIN ENTRY POINT: Process a finished run for territory capture
 # ═══════════════════════════════════════════════════════════════
 
@@ -372,6 +449,12 @@ async def process_run_territory(db: AsyncSession, run_id: str) -> dict:
 
     for poly in polygons:
         area = compute_area_sqm(poly)
+
+        # ─── Anti-cheat: Check for replay ─────────────────────
+        replay_check = await check_territory_replay(db, run.user_id, poly)
+        if replay_check["is_replay"]:
+            logger.warning(f"[Territory] Replay penalty applied: {replay_check['reason']}")
+            area = area * replay_check["penalty_multiplier"]
 
         # Save the new territory
         territory = Territory(

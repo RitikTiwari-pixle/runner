@@ -13,11 +13,21 @@ geoalchemy2>=0.15.1
 # ─── Geospatial ──────────────────────────
 shapely>=2.0.5
 
+# ─── Authentication (Local & JWT) ─────────
+passlib[bcrypt]>=1.7.4
+PyJWT==2.12.1                # Pinned: CVE-2026-32597 fixed in 2.12.0+
+python-multipart>=0.0.12
+
 # ─── Firebase ────────────────────────────
-firebase-admin>=6.5.0
+firebase-admin>=6.6.0
+pyasn1==0.6.3
 
 # ─── HTTP Client (integrations) ─────────
-httpx>=0.27.0
+httpx>=0.28.0
+requests==2.33.1             # Pinned: CVE-2026-25645 fixed in 2.33.0+
 
-# ─── Auth (Garmin OAuth 1.0a) ───────────
-authlib>=1.3.1
+# ─── Auth (OAuth) ───────────────────────
+authlib==1.6.9               # Pinned: CVE-2026-28490/27962/28498 (Timing, Signature, Failing Open)
+
+# ─── TLS / Cryptography ─────────────────
+cryptography==46.0.6         # Pinned: CVE-2026-34073 fixed in 46.0.6+

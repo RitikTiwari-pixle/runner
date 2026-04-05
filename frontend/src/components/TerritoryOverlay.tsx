@@ -17,9 +17,26 @@ interface TerritoryData {
 interface Props {
     territories: TerritoryData[];
     currentUserId: string;
+    ownTerritoryColor?: string;
 }
 
-export default function TerritoryOverlay({ territories, currentUserId }: Props) {
+function hexToRgba(hex: string, alpha: number): string {
+    const normalized = hex.replace('#', '');
+    if (!/^[0-9A-Fa-f]{6}$/.test(normalized)) {
+        console.warn(`[TerritoryOverlay] Invalid hex color: "${hex}" - using default green`);
+        return `rgba(0, 255, 136, ${alpha})`;
+    }
+    const r = parseInt(normalized.slice(0, 2), 16);
+    const g = parseInt(normalized.slice(2, 4), 16);
+    const b = parseInt(normalized.slice(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+export default function TerritoryOverlay({
+    territories,
+    currentUserId,
+    ownTerritoryColor = '#00FF88',
+}: Props) {
     return (
         <>
             {territories.map((territory) => {
@@ -35,13 +52,13 @@ export default function TerritoryOverlay({ territories, currentUserId }: Props) 
                     <MapPolygon
                         key={territory.id}
                         coordinates={coords}
-                        fillColor={
-                            isOwned
-                                ? 'rgba(0, 255, 136, 0.2)'  // Green: your territory
-                                : 'rgba(255, 59, 48, 0.15)'  // Red: enemy territory
-                        }
+                            fillColor={
+                                isOwned
+                                    ? hexToRgba(ownTerritoryColor, 0.4)
+                                    : 'rgba(255, 59, 48, 0.15)'  // Red: enemy territory
+                            }
                         strokeColor={
-                            isOwned ? '#00FF88' : '#FF3B30'
+                            isOwned ? ownTerritoryColor : '#FF3B30'
                         }
                         strokeWidth={2}
                         tappable={true}

@@ -1,0 +1,28 @@
+# Local-Only Offline Configuration
+name: My Local Coder
+version: 1.0.0
+schema: v1
+
+# Define which models can be used
+# We are removing OpenAI and Anthropic to ensure no internet is needed.
+models:
+  - name: Local Qwen 3.5
+    provider: ollama
+    model: qwen3.5:0.8b
+  # If you pulled the 7b version, add it here too:
+  - name: Qwen3 Coder 7B
+    provider: ollama
+    model: qwen3-coder:7b
+
+# This enables the gray "ghost text" suggestions as you type
+tabAutocompleteModel:
+  name: Local Autocomplete
+  provider: ollama
+  model: qwen3.5:0.8b
+
+# This allows the AI to search your local files (Cloud-style indexing)
+contextProviders:
+  - name: codebase
+  - name: terminal
+  - name: diff
+  - name: openFiles

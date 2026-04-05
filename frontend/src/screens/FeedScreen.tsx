@@ -2,13 +2,16 @@
  * FeedScreen — Social activity feed from friends and personal history.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
     View, Text, FlatList, StyleSheet, TouchableOpacity,
-    ActivityIndicator, RefreshControl,
+    ActivityIndicator, RefreshControl, Alert,
 } from 'react-native';
-import { getFriendsFeed, getPersonalFeed } from '../services/apiService';
+import { getFriendsFeed, getPersonalFeed, reportSuspiciousRun } from '../services/apiService';
 import { getUserId } from '../services/authService';
+import { formatDuration, getTimeAgo } from '../utils/geo';
+import { useGlobalSettings } from '../context/GlobalSettingsContext';
+import { convertDistance } from '../utils/distanceUnits';
 
 const ACTIVITY_ICONS: Record<string, string> = {
     run_completed: '🏃',
@@ -33,25 +36,30 @@ export default function FeedScreen({ onViewProfile }: { onViewProfile?: (id: str
     const [items, setItems] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const { settings } = useGlobalSettings();
 
-    const load = async () => {
+    const load = useCallback(async () => {
         const myId = getUserId();
         if (!myId) { setLoading(false); return; }
 
         try {
+            setError(null);
             const data = tab === 'friends'
                 ? await getFriendsFeed(myId, 50)
                 : await getPersonalFeed(myId, 50);
             setItems(data);
         } catch (e) {
             console.error('[Feed] Load failed:', e);
+            const errorMessage = e instanceof Error ? e.message : 'Failed to load activity feed';
+            setError(errorMessage);
         } finally {
             setLoading(false);
             setRefreshing(false);
         }
-    };
+    }, [tab]);
 
-    useEffect(() => { setLoading(true); load(); }, [tab]);
+    useEffect(() => { setLoading(true); load(); }, [tab, load]);
 
     const renderItem = ({ item }: { item: any }) => {
         const icon = ACTIVITY_ICONS[item.type] || '📌';
@@ -80,10 +88,24 @@ export default function FeedScreen({ onViewProfile }: { onViewProfile?: (id: str
                 {/* Metadata details */}
                 {item.type === 'run_completed' && meta.distance_m && (
                     <View style={s.detailRow}>
-                        <DetailChip label="Distance" value={`${(meta.distance_m / 1000).toFixed(1)} km`} />
+                        <DetailChip label="Distance" value={convertDistance(meta.distance_m, settings.distanceUnit)} />
                         {meta.duration_s && <DetailChip label="Time" value={formatDuration(meta.duration_s)} />}
                     </View>
                 )}
+
+                {/* Report button for suspicious runs */}
+                {item.type === 'run_completed' && (
+                    <View style={s.detailRow}>
+                        <TouchableOpacity
+                            style={s.reportButton}
+                            onPress={() => handleReportSuspicious(item.id)}
+                            activeOpacity={0.8}
+                        >
+                            <Text style={s.reportText}>🚩 Report Suspicious Run</Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
+
                 {item.type === 'territory_captured' && (
                     <View style={s.detailRow}>
                         <DetailChip label="Territories" value={`${meta.count}`} />
@@ -120,6 +142,17 @@ export default function FeedScreen({ onViewProfile }: { onViewProfile?: (id: str
 
             {loading ? (
                 <ActivityIndicator size="large" color="#00E676" style={{ marginTop: 40 }} />
+            ) : error ? (
+                <View style={s.errorContainer}>
+                    <Text style={s.errorEmoji}>⚠️</Text>
+                    <Text style={s.errorText}>{error}</Text>
+                    <TouchableOpacity
+                        style={s.retryButton}
+                        onPress={() => { setLoading(true); load(); }}
+                    >
+                        <Text style={s.retryButtonText}>🔄 Try Again</Text>
+                    </TouchableOpacity>
+                </View>
             ) : (
                 <FlatList
                     data={items}
@@ -147,21 +180,27 @@ function DetailChip({ label, value }: { label: string; value: string }) {
     );
 }
 
-function formatDuration(seconds: number): string {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    return h > 0 ? `${h}h ${m}m` : `${m}m`;
-}
-
-function getTimeAgo(isoString: string): string {
-    const diff = Date.now() - new Date(isoString).getTime();
-    const mins = Math.floor(diff / 60000);
-    if (mins < 1) return 'just now';
-    if (mins < 60) return `${mins}m ago`;
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `${hrs}h ago`;
-    const days = Math.floor(hrs / 24);
-    return days === 1 ? 'yesterday' : `${days}d ago`;
+async function handleReportSuspicious(runId: string) {
+    Alert.alert(
+        'Report Suspicious Run',
+        'Are you sure you want to flag this run as suspicious?',
+        [
+            { text: 'Cancel', style: 'cancel' },
+            {
+                text: 'Report',
+                style: 'destructive',
+                onPress: async () => {
+                    try {
+                        await reportSuspiciousRun(runId);
+                        Alert.alert('Reported', 'Thank you for helping keep the game fair!');
+                    } catch (e) {
+                        console.error('[Feed] Report failed:', e);
+                        Alert.alert('Report Failed', 'Please try again later.');
+                    }
+                },
+            },
+        ]
+    );
 }
 
 const s = StyleSheet.create({
@@ -179,9 +218,27 @@ const s = StyleSheet.create({
     cardTitle: { color: '#D1D5DB', fontSize: 14 },
     nameText: { color: '#FFFFFF', fontWeight: 'bold' },
     timeText: { color: '#6B7280', fontSize: 11, marginTop: 2 },
-    detailRow: { flexDirection: 'row', marginTop: 10, gap: 8 },
+    detailRow: { flexDirection: 'row', marginTop: 10, gap: 8, flexWrap: 'wrap' },
     chip: { backgroundColor: '#1A2030', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
     chipLabel: { color: '#6B7280', fontSize: 10 },
     chipValue: { color: '#00E676', fontSize: 14, fontWeight: 'bold' },
     empty: { color: '#8892A4', textAlign: 'center', marginTop: 40, fontSize: 14, paddingHorizontal: 32 },
+    errorContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32, gap: 12 },
+    errorEmoji: { fontSize: 48 },
+    errorText: { color: '#EF4444', textAlign: 'center', fontSize: 14 },
+    retryButton: { backgroundColor: '#00E676', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8, marginTop: 8 },
+    retryButtonText: { color: '#0A0E1A', fontWeight: 'bold', fontSize: 14 },
+    reportButton: {
+        backgroundColor: 'rgba(239, 68, 68, 0.15)',
+        borderWidth: 1,
+        borderColor: 'rgba(239, 68, 68, 0.4)',
+        borderRadius: 8,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+    },
+    reportText: {
+        color: '#EF4444',
+        fontSize: 12,
+        fontWeight: '600',
+    },
 });

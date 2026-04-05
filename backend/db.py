@@ -4,6 +4,7 @@ Async SQLAlchemy engine with PostGIS support via GeoAlchemy2.
 """
 
 import os
+from typing import AsyncGenerator
 from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
@@ -15,23 +16,34 @@ DATABASE_URL = os.getenv(
     "postgresql+asyncpg://postgres:postgres@localhost:5432/territory_runner"
 )
 
-engine = create_async_engine(DATABASE_URL, echo=False, pool_size=20, max_overflow=10)
-async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+# Engine configured for async operations
+engine = create_async_engine(
+    DATABASE_URL, 
+    echo=False, 
+    pool_size=20, 
+    max_overflow=10
+)
 
+# Session factory bound to the async engine
+async_session = async_sessionmaker(
+    engine, 
+    class_=AsyncSession, 
+    expire_on_commit=False
+)
 
 class Base(DeclarativeBase):
     """Base class for all SQLAlchemy ORM models."""
     pass
 
-
-async def get_db() -> AsyncSession:
+# FIX: Added correct typing for a yield dependency (AsyncGenerator)
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """FastAPI dependency — yields an async database session."""
     async with async_session() as session:
         try:
             yield session
             await session.commit()
-        except Exception:
+        except Exception as e:
             await session.rollback()
-            raise
+            raise e
         finally:
             await session.close()

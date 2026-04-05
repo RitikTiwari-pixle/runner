@@ -1,3 +1,2 @@
-from .run import User, Run, RunPoint, Territory, Dispute
+from .run import User, Run, RunPoint, Territory, Dispute, EmailOTPCode
 from .social import Follow, Activity
-from .device_connection import DeviceConnection

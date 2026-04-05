@@ -15,11 +15,13 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 import { GPSPoint, RunStatus, Coordinate, RunMetrics } from '../types/run';
 import { haversineDistance } from '../utils/geo';
+import { checkLocationPermissions, requestLocationPermissions } from '../utils/permissions';
 import {
     startForegroundTracking,
     startBackgroundTracking,
     stopBackgroundTracking,
     flushBuffer,
+    clearBuffer,
     setOnPointCallback,
     recoverBuffer,
 } from '../services/locationService';
@@ -118,10 +120,11 @@ export function useRunTracker(userId: string): UseRunTrackerReturn {
             if (points.length > 0) {
                 try {
                     await api.syncPoints(runIdRef.current, points);
+                    clearBuffer(); // Only clear after successful sync
+                    console.log(`[Sync] Successfully synced ${points.length} points`);
                 } catch (e) {
-                    console.error('[Sync] Failed to sync points, will retry:', e);
-                    // Points are lost from buffer but still in route state
-                    // The finish call will re-compute from stored points
+                    console.error('[Sync] Failed to sync points, will retry next interval:', e);
+                    // Points remain in buffer for retry
                 }
             }
         }, SYNC_INTERVAL_MS);
@@ -151,6 +154,19 @@ export function useRunTracker(userId: string): UseRunTrackerReturn {
 
     // ─── START RUN ──────────────────────────────────────────────
     const startRun = useCallback(async () => {
+        try {
+            const permissionStatus = await checkLocationPermissions();
+            if (!permissionStatus.foreground) {
+                const granted = await requestLocationPermissions();
+                if (!granted) {
+                    throw new Error('Location permission is required to start a run.');
+                }
+            }
+        } catch (e) {
+            console.error('[Run] Permission check failed:', e);
+            throw e;
+        }
+
         // Recover any points from a previous crash
         const recovered = await recoverBuffer();
         if (recovered.length > 0) {

@@ -9,10 +9,10 @@ import { RunStatus } from '../types/run';
 
 interface Props {
     status: RunStatus;
-    onStart: () => void;
+    onStart: () => Promise<void> | void;
     onPause: () => void;
     onResume: () => void;
-    onStop: () => void;
+    onStop: () => Promise<void> | void;
 }
 
 export default function RunControls({ status, onStart, onPause, onResume, onStop }: Props) {

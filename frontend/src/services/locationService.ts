@@ -156,22 +156,40 @@ export async function stopBackgroundTracking(): Promise<void> {
 
 /**
  * Get the current user location (one-shot).
+ * Returns normalized location object with coords property for consistency with web.
  */
-export async function getCurrentLocation(): Promise<Location.LocationObject> {
-    return Location.getCurrentPositionAsync({
+export async function getCurrentLocation(): Promise<{ coords: { latitude: number; longitude: number; altitude?: number; accuracy?: number; speed?: number } }> {
+    const location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.BestForNavigation,
     });
+    return {
+        coords: {
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+            altitude: location.coords.altitude ?? undefined,
+            accuracy: location.coords.accuracy ?? undefined,
+            speed: location.coords.speed ?? undefined,
+        },
+    };
 }
 
 /**
  * Flush the buffer: returns all buffered points and clears the buffer.
  * Call this periodically to batch-sync points to the backend.
+ * NOTE: Call clearBuffer() only after confirming successful sync to avoid data loss.
  */
 export function flushBuffer(): GPSPoint[] {
     const flushed = [...pointBuffer];
+    return flushed;
+}
+
+/**
+ * Clear the buffer after confirming successful sync.
+ * This is separate from flushBuffer to avoid data loss on sync failure.
+ */
+export function clearBuffer(): void {
     pointBuffer = [];
     clearPersistedBuffer();
-    return flushed;
 }
 
 /**
