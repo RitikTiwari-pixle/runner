@@ -45,10 +45,18 @@ app = FastAPI(
 
 
 # ─── CORS ────────────────────────────────────────────────────────
+_raw_origins = os.getenv("CORS_ORIGINS", "")
+if _raw_origins.strip():
+    _allowed_origins: list[str] = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+else:
+    # Development fallback — covers web browser, Expo Go, and common LAN IPs
+    _allowed_origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=_allowed_origins,
+    # credentials (cookies/auth headers) require explicit origins, not wildcard
+    allow_credentials=("*" not in _allowed_origins),
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["*"],

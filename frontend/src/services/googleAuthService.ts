@@ -13,6 +13,7 @@
 
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
+import { Platform } from 'react-native';
 
 // Configure web browser for auth session
 WebBrowser.maybeCompleteAuthSession();
@@ -173,9 +174,9 @@ export interface AuthLogger {
  * Uses lazy initialization to support hot reloading in development
  */
 function createRedirectUri(): string {
-  return AuthSession.makeRedirectUri({
-    useProxy: true,
-  });
+  // useProxy was removed in expo-auth-session v7; makeRedirectUri() now infers
+  // the correct URI automatically based on the app's scheme and environment.
+  return AuthSession.makeRedirectUri();
 }
 
 /**
@@ -398,14 +399,14 @@ export async function signInWithGoogle(): Promise<GoogleAuthResult | null> {
 
     const request = new AuthSession.AuthRequest({
       clientId: config.clientId,
-      redirectUrl: config.redirectUri,
+      redirectUri: config.redirectUri,
       responseType: AUTH_RESPONSE_TYPE,
-      scopes: config.scopes,
+      // Spread to convert readonly string[] → mutable string[]
+      scopes: [...config.scopes],
     });
 
-    const result = await request.promptAsync(config.discovery, {
-      useProxy: true,
-    });
+    // useProxy was removed in expo-auth-session v7
+    const result = await request.promptAsync(config.discovery);
 
     return handleAuthResult(result);
   } catch (error) {
@@ -445,14 +446,16 @@ function handleAuthResult(
 
   switch (result.type) {
     case 'success': {
-      const idToken = result.params.id_token;
-      if (isValidIdToken(idToken)) {
+      // In expo-auth-session v7 the 'params' field is typed without known keys,
+      // so accessing .id_token directly collapses to 'never'.
+      // Cast params to a plain record first so TypeScript doesn't narrow it away.
+      const params = result.params as Record<string, string | undefined>;
+      const rawToken: string | undefined = params['id_token'];
+      if (isValidIdToken(rawToken)) {
         log.info('Login successful');
-        return {
-          idToken,
-        };
+        return { idToken: rawToken };
       }
-      log.error('Invalid ID token received', { tokenLength: idToken?.length });
+      log.error('Invalid ID token received', { tokenLength: rawToken?.length ?? 0 });
       throw new GoogleAuthError(
         'Invalid ID token received from Google',
         GoogleAuthErrorCode.INVALID_TOKEN
@@ -611,7 +614,9 @@ export function decodeIdToken(token: string): GoogleUserProfile | null {
  * Check if the current platform supports Google OAuth
  */
 export function isGoogleOAuthSupported(): boolean {
-  return AuthSession.platformSupportsSecureStore();
+  // platformSupportsSecureStore was removed in expo-auth-session v7.
+  // Google OAuth via expo-auth-session works on iOS and Android but not bare web.
+  return Platform.OS === 'ios' || Platform.OS === 'android';
 }
 
 /**

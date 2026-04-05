@@ -497,18 +497,3 @@ async def verify_email_otp(
         }
     
     raise ValueError("Invalid OTP purpose")
-
-    if not new_password or len(new_password) < 8:
-        raise ValueError("New password must be at least 8 characters")
-
-    user.password_hash = hash_password(new_password)
-    token = create_jwt_token(str(user.id))
-    return {
-        "flow": "password_reset",
-        "message": "Password reset successful.",
-        "token": token,
-        "user_id": str(user.id),
-        "username": user.username,
-        "email": user.email,
-        "email_verified": user.email_verified,
-    }

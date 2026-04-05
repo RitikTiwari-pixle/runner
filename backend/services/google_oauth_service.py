@@ -95,9 +95,9 @@ async def get_or_create_google_user(
             return existing_user
         
         # Create new user from Google profile
-        import uuid
+        import uuid as _uuid
         user = User(
-            id=str(uuid.uuid4()),
+            id=_uuid.uuid4(),
             email=email.lower().strip(),
             username=_generate_username_from_email(email),
             display_name=name or email.split("@")[0],
