@@ -10,8 +10,4 @@ ADD COLUMN IF NOT EXISTS profile_picture_url TEXT;
 -- Create index on google_id for faster lookups
 CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id) WHERE google_id IS NOT NULL;
 
--- Log migration
-DO $$
-BEGIN
-  RAISE NOTICE 'Migration 006: Google OAuth support added';
-END $$;
+-- Log migration handled by runner

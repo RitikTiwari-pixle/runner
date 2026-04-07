@@ -1,77 +1,63 @@
 # ──────────────────────────────────────────────────────────────
-# Territory Runner — Backend Dockerfile (OPTIMIZED)
+# Territory Runner — Backend Dockerfile (Railway-ready)
+#
+# Deploy to Railway:
+#   1. Push this repo / connect Railway to GitHub
+#   2. Railway will auto-detect the Dockerfile and build it
+#   3. Set your environment variables in Railway's dashboard
+#      (DATABASE_URL, JWT_SECRET_KEY, GOOGLE_OAUTH_CLIENT_ID, etc.)
+#   4. Railway injects PORT automatically — no need to set it yourself
 # ──────────────────────────────────────────────────────────────
 
-# ─── Build stage ──────────────────────────────────────────────
 FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
-# Install build dependencies
+# Install build-time dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Create virtual environment for cleaner copy
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 # ─── Production image ────────────────────────────────────────
 
-FROM python:3.12-slim AS production
+FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install runtime dependencies and tini for proper init process
+# Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     libgeos-c1v5 \
-    tini \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get purge -y --auto-remove \
-    && apt-get clean
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy virtual environment from builder
-COPY --from=builder /opt/venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-# Copy application code
+COPY --from=builder /install /usr/local
 COPY . .
 
-# Create non-root user for security
-RUN useradd --create-home --shell /bin/bash appuser \
-    && chown -R appuser:appuser /app
-
-# Switch to non-root user
+# Non-root user for security
+RUN useradd --create-home appuser && chown -R appuser:appuser /app
 USER appuser
 
-EXPOSE 8000
+# Railway injects $PORT at runtime (default 8000 for local Docker)
+ENV PORT=8000
+EXPOSE $PORT
 
-# Health check for container orchestration
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" \
-    || exit 1
-
-# Use tini as init process for proper signal handling
-# Dynamically calculate workers: (2 x $CPU_CORES) + 1
-# Recommended: Use environment variable or entrypoint script for worker calculation
-ENTRYPOINT ["/usr/bin/tini", "--"]
-
-CMD ["gunicorn", "main:app", \
-     "-k", "uvicorn.workers.UvicornWorker", \
-     "-b", "0.0.0.0:8000", \
-     "--workers", "2", \
-     "--worker-connections", "1000", \
-     "--timeout", "120", \
-     "--graceful-timeout", "30", \
-     "--keep-alive", "5", \
-     "--access-logfile", "-", \
-     "--error-logfile", "-", \
-     "--log-level", "info", \
-     "--max-requests", "1000", \
-     "--max-requests-jitter", "50", \
-     "--capture-output"]
+# Use shell form so $PORT is expanded at container start time.
+# Workers=2 is safe for Railway's starter plan (512 MB RAM).
+CMD gunicorn main:app \
+    -k uvicorn.workers.UvicornWorker \
+    -b "0.0.0.0:${PORT}" \
+    --workers 2 \
+    --worker-connections 1000 \
+    --threads 2 \
+    --timeout 120 \
+    --graceful-timeout 30 \
+    --keep-alive 5 \
+    --max-requests 10000 \
+    --max-requests-jitter 1000 \
+    --access-logfile - \
+    --error-logfile - \
+    --log-level info

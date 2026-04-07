@@ -142,8 +142,8 @@ def _send_via_smtp(message: EmailMessage) -> None:
     password = os.getenv("SMTP_PASSWORD")
     use_tls = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
 
-    # 10 s timeout ensures we fail before the 15 s axios client timeout.
-    with smtplib.SMTP(host, port, timeout=10) as server:
+    # 5 s timeout — short enough that two retries fit under the 15 s axios client timeout.
+    with smtplib.SMTP(host, port, timeout=5) as server:
         if use_tls:
             server.starttls()
         if username:

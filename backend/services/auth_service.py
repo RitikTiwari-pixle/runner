@@ -233,6 +233,7 @@ async def _issue_otp(
     purpose: str,
     user_id: uuid.UUID | None = None,
 ) -> dict:
+    import asyncio
     code = _create_otp_code()
     otp = EmailOTPCode(
         user_id=user_id,
@@ -243,16 +244,27 @@ async def _issue_otp(
         expires_at=_now() + timedelta(minutes=OTP_EXPIRY_MINUTES),
     )
     db.add(otp)
-    await db.flush()
+    await db.flush()  # Persist OTP record before sending email
 
-    delivered = await send_otp_email(email, code, purpose, OTP_EXPIRY_MINUTES)
+    # Always log the code in debug mode so devs can test without real email
+    if _otp_debug_enabled():
+        logger.warning(
+            "[Auth] OTP DEBUG ▶ email=%s | purpose=%s | code=%s — "
+            "Set OTP_DEBUG_MODE=false before going to production!",
+            email, purpose, code,
+        )
 
-    if not delivered:
-        logger.warning("[Auth] OTP delivery not confirmed for %s (%s)", email, purpose)
+    # Send email in background — don't block the HTTP response on SMTP.
+    # If email fails, the user can use "resend" on the next screen.
+    async def _fire_and_forget():
+        delivered = await send_otp_email(email, code, purpose, OTP_EXPIRY_MINUTES)
+        if not delivered:
+            logger.warning("[Auth] OTP email not delivered for %s (%s) — user can resend", email, purpose)
 
-    return {
-        "delivered": delivered,
-    }
+    asyncio.create_task(_fire_and_forget())
+
+    return {"delivered": True}  # Optimistic — actual delivery logged async
+
 
 
 async def register_local(

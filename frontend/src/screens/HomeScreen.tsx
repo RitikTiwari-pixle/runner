@@ -8,10 +8,12 @@ import {
     TouchableOpacity,
     ActivityIndicator,
     Image,
+    Platform,
 } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { getProfile } from '../services/apiService';
+import * as api from '../services/apiService';
 import { getUserId } from '../services/authService';
 import type { MainTabParamList } from '../navigation/types';
 
@@ -79,8 +81,17 @@ export default function HomeScreen({ userId: propsUserId }: HomeScreenProps) {
             const data = await getProfile(authUserId);
             if (!data) { setError('Profile not found'); setProfile(null); }
             else { setProfile(data); setError(null); }
-        } catch (err) {
-            setError('Failed to load profile. Check your connection.');
+        } catch (err: any) {
+            // Give a more specific message to help diagnose connectivity issues
+            if (err?.message === 'Network Error' || err?.code === 'ERR_NETWORK') {
+                setError('Cannot reach server.\n\nMake sure the backend is running at\n' + (api.API_BASE_URL ?? 'unknown URL'));
+            } else if (err?.response?.status === 404) {
+                setError('Profile not found. It may still be setting up.');
+            } else if (err?.response?.status === 401) {
+                setError('Session expired. Please log out and log in again.');
+            } else {
+                setError('Failed to load profile. Check your connection and retry.');
+            }
             setProfile(null);
         } finally {
             setLoading(false);
@@ -233,8 +244,12 @@ export default function HomeScreen({ userId: propsUserId }: HomeScreenProps) {
                                     styles.xpBarFill,
                                     { width: `${Math.min((profile.xp % 1000) / 10, 100)}%` },
                                 ]}
-                            />
-                            <View style={[styles.xpBarGlow, { left: `${xpPercent - 2}%` }]} />
+                            >
+                                {/* Glow dot rendered inside the fill bar so it stays at the right edge */}
+                                {Platform.OS !== 'web' && (
+                                    <View style={styles.xpBarGlow} />
+                                )}
+                            </View>
                         </View>
                         <View style={styles.xpFooter}>
                             <Text style={styles.xpRemaining}>{xpToNext} XP to next level</Text>
@@ -448,6 +463,7 @@ const styles = StyleSheet.create({
     xpBarGlow: {
         position: 'absolute',
         top: -2,
+        right: 0,
         width: 8,
         height: 14,
         borderRadius: 4,

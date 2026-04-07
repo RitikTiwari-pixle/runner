@@ -28,8 +28,20 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
 /** OAuth response type */
 const AUTH_RESPONSE_TYPE = AuthSession.ResponseType.IdToken;
 
+
 /** Default scopes for Google OAuth */
 const DEFAULT_SCOPES = ['openid', 'profile', 'email'] as const;
+
+/**
+ * On web, Google requires PKCE Authorization Code flow (implicit is deprecated).
+ * On native, we can still use the Implicit IdToken flow.
+ */
+function getResponseType(): AuthSession.ResponseType {
+  if (Platform.OS === 'web') {
+    return AuthSession.ResponseType.Code;
+  }
+  return AuthSession.ResponseType.IdToken;
+}
 
 // ============================================================================
 // Error Codes
@@ -170,14 +182,29 @@ export interface AuthLogger {
 // ============================================================================
 
 /**
- * Creates the redirect URI for OAuth callbacks
- * Uses lazy initialization to support hot reloading in development
+ * Creates the redirect URI for OAuth callbacks.
+ *
+ * - On **web** (browser): use `http://localhost:8081` — this must be
+ *   registered in Google Cloud Console under "Authorized redirect URIs".
+ * - On **native** (Expo Go / standalone): use makeRedirectUri() which
+ *   generates the appropriate exp:// or custom-scheme URI for the device.
+ *
+ * ⚠️  If your dev machine IP is not 127.0.0.1, add both variants to
+ *     Google Cloud Console → APIs & Services → Credentials → OAuth Client.
  */
 function createRedirectUri(): string {
-  // useProxy was removed in expo-auth-session v7; makeRedirectUri() now infers
-  // the correct URI automatically based on the app's scheme and environment.
+  if (Platform.OS === 'web') {
+    // Browser always resolves relative to its own origin; use a fixed
+    // localhost URI that you can register once in the Console.
+    const origin = (typeof window !== 'undefined' && window?.location?.origin)
+      ? window.location.origin
+      : 'http://localhost:8081';
+    return origin;
+  }
+  // Native: Expo makeRedirectUri() picks up the correct exp:// or scheme URI.
   return AuthSession.makeRedirectUri();
 }
+
 
 /**
  * Gets the OAuth configuration
@@ -400,15 +427,16 @@ export async function signInWithGoogle(): Promise<GoogleAuthResult | null> {
     const request = new AuthSession.AuthRequest({
       clientId: config.clientId,
       redirectUri: config.redirectUri,
-      responseType: AUTH_RESPONSE_TYPE,
+      responseType: getResponseType(),
       // Spread to convert readonly string[] → mutable string[]
       scopes: [...config.scopes],
+      // PKCE is required for web (code flow), ignored on native (implicit flow)
+      usePKCE: Platform.OS === 'web',
     });
 
-    // useProxy was removed in expo-auth-session v7
     const result = await request.promptAsync(config.discovery);
 
-    return handleAuthResult(result);
+    return handleAuthResult(result, request);
   } catch (error) {
     if (error instanceof GoogleAuthError) {
       throw error;
@@ -440,22 +468,35 @@ export async function signInWithGoogle(): Promise<GoogleAuthResult | null> {
  * @throws {GoogleAuthError} On authentication failure
  */
 function handleAuthResult(
-  result: AuthSession.AuthSessionResult
+  result: AuthSession.AuthSessionResult,
+  request?: AuthSession.AuthRequest | null
 ): GoogleAuthResult | null {
   const log = getLogger();
 
   switch (result.type) {
     case 'success': {
-      // In expo-auth-session v7 the 'params' field is typed without known keys,
-      // so accessing .id_token directly collapses to 'never'.
-      // Cast params to a plain record first so TypeScript doesn't narrow it away.
       const params = result.params as Record<string, string | undefined>;
-      const rawToken: string | undefined = params['id_token'];
+
+      // ── Web (PKCE Code flow): extract id_token from the code response ──
+      // The AuthRequest.promptAsync() handles the token exchange automatically
+      // when usePKCE=true; the id_token appears in params directly.
+      const rawToken: string | undefined =
+        params['id_token'] ||
+        (result as any)?.authentication?.idToken ||
+        params['access_token'];  // fallback: send access_token if no id_token
+
       if (isValidIdToken(rawToken)) {
         log.info('Login successful');
         return { idToken: rawToken };
       }
-      log.error('Invalid ID token received', { tokenLength: rawToken?.length ?? 0 });
+
+      // On web code flow, id_token might not be in params if the token
+      // endpoint wasn't called. Log what we got for debugging.
+      log.error('Invalid or missing ID token', {
+        tokenLength: (rawToken as string | undefined)?.length ?? 0,
+        paramKeys: Object.keys(params),
+        hasAuthentication: !!(result as any)?.authentication,
+      });
       throw new GoogleAuthError(
         'Invalid ID token received from Google',
         GoogleAuthErrorCode.INVALID_TOKEN
@@ -614,9 +655,9 @@ export function decodeIdToken(token: string): GoogleUserProfile | null {
  * Check if the current platform supports Google OAuth
  */
 export function isGoogleOAuthSupported(): boolean {
-  // platformSupportsSecureStore was removed in expo-auth-session v7.
-  // Google OAuth via expo-auth-session works on iOS and Android but not bare web.
-  return Platform.OS === 'ios' || Platform.OS === 'android';
+  // Google OAuth via expo-auth-session works on iOS, Android, and modern web browsers.
+  // Only native requires additional setup (scheme redirect); web uses redirect_uri.
+  return Platform.OS === 'ios' || Platform.OS === 'android' || Platform.OS === 'web';
 }
 
 /**

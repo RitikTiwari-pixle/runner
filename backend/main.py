@@ -28,10 +28,21 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# ─── Lifespan (startup / shutdown) ───────────────────────────────
+# ─── Lifespan (startup / shutdown) ─────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("🚀 Territory Runner API starting up")
+    # Test DB connectivity on startup — logs clearly if unreachable
+    try:
+        from db import engine
+        from sqlalchemy import text
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        logger.info("✅ Database connection verified")
+    except Exception as exc:
+        logger.error("❌ Database connection failed at startup: %s", exc)
+        logger.error("   Check DATABASE_URL in your environment variables")
+        # Don't crash — Railway will handle restarts; DB might just be warming up
     yield
     logger.info("🛑 Territory Runner API shutting down")
 
@@ -73,3 +84,24 @@ app.include_router(progression_router, prefix="/api")
 @app.get("/")
 async def root():
     return {"message": "Welcome to the Territory Runner API! Go to /docs for the interactive API documentation."}
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Railway and monitoring tools."""
+    import time
+    from db import engine
+    from sqlalchemy import text
+    db_ok = False
+    db_error = None
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        db_ok = True
+    except Exception as exc:
+        db_error = str(exc)
+    return {
+        "status": "ok" if db_ok else "degraded",
+        "database": "connected" if db_ok else f"error: {db_error}",
+        "timestamp": time.time(),
+    }
