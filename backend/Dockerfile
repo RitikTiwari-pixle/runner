@@ -14,13 +14,16 @@ FROM python:3.12-slim AS builder
 WORKDIR /app
 
 # Install build-time dependencies
+# Note: libgeos-dev NOT needed — shapely ships pre-built wheels (manylinux)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+# --only-binary shapely prevents source compilation (avoids libgeos-dev + OOM)
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir --only-binary shapely --prefix=/install -r requirements.txt
 
 # ─── Production image ────────────────────────────────────────
 
@@ -50,8 +53,8 @@ EXPOSE $PORT
 CMD gunicorn main:app \
     -k uvicorn.workers.UvicornWorker \
     -b "0.0.0.0:${PORT}" \
-    --workers 2 \
-    --worker-connections 1000 \
+    --workers 1 \
+    --worker-connections 500 \
     --threads 2 \
     --timeout 120 \
     --graceful-timeout 30 \
