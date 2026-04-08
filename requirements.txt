@@ -9,6 +9,7 @@ pydantic-settings>=2.1.0
 # ─── Database ────────────────────────────
 sqlalchemy[asyncio]>=2.0.32
 asyncpg>=0.29.0
+psycopg2-binary>=2.9.9
 geoalchemy2>=0.15.1
 
 # ─── Geospatial ──────────────────────────
@@ -32,4 +33,4 @@ authlib>=1.6.9
 
 # ─── TLS / Cryptography ─────────────────
 cryptography>=46.0.6
-
+

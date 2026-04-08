@@ -29,6 +29,11 @@ DATABASE_URL = normalize_database_url(os.getenv(
     "postgresql+asyncpg://postgres:postgres@localhost:5432/territory_runner",
 ))
 
+if not DATABASE_URL.startswith("postgresql+asyncpg://"):
+    raise RuntimeError(
+        "DATABASE_URL must resolve to postgresql+asyncpg:// for async SQLAlchemy engine."
+    )
+
 # Engine configured for async operations
 engine = create_async_engine(
     DATABASE_URL, 
