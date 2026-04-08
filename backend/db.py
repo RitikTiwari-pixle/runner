@@ -11,10 +11,28 @@ from sqlalchemy.orm import DeclarativeBase
 
 load_dotenv()
 
-DATABASE_URL = os.getenv(
+def normalize_database_url(raw_url: str) -> str:
+    url = raw_url.strip()
+    if url.startswith("postgres://"):
+        # Railway-style URL alias
+        url = url.replace("postgres://", "postgresql://", 1)
+    if url.startswith("postgresql+psycopg2://"):
+        url = url.replace("postgresql+psycopg2://", "postgresql+asyncpg://", 1)
+    if url.startswith("postgresql://") and not url.startswith("postgresql+asyncpg://"):
+        # Force async driver for SQLAlchemy async engine
+        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return url
+
+
+DATABASE_URL = normalize_database_url(os.getenv(
     "DATABASE_URL",
-    "postgresql+asyncpg://postgres:postgres@localhost:5432/territory_runner"
-)
+    "postgresql+asyncpg://postgres:postgres@localhost:5432/territory_runner",
+))
+
+if not DATABASE_URL.startswith("postgresql+asyncpg://"):
+    raise RuntimeError(
+        "DATABASE_URL must resolve to postgresql+asyncpg:// for async SQLAlchemy engine."
+    )
 
 # Engine configured for async operations
 engine = create_async_engine(
