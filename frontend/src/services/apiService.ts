@@ -7,7 +7,11 @@ import { GPSPoint, RunSession } from '../types/run';
 import { getToken } from './authService';
 
 function normalizeApiUrl(rawUrl: string): string {
-    const trimmed = rawUrl.trim().replace(/\/+$/, '');
+    let trimmed = rawUrl.trim().replace(/\/+$/, '');
+    if (!/^[a-z]+:\/\//i.test(trimmed)) {
+        const isLocalHost = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/i.test(trimmed);
+        trimmed = `${isLocalHost ? 'http' : 'https'}://${trimmed}`;
+    }
     return trimmed.endsWith('/api') ? trimmed : `${trimmed}/api`;
 }
 
