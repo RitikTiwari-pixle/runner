@@ -13,11 +13,15 @@ function normalizeApiUrl(rawUrl: string): string {
 
 const ENV_API_URL = process.env.EXPO_PUBLIC_API_URL?.trim();
 const DEV_FALLBACK_API_URL = 'http://localhost:8000';
-const PROD_FALLBACK_API_URL = 'https://api.territoryrunner.in';
+const PROD_FALLBACK_API_URL = 'https://your-backend.up.railway.app';
 
 const resolvedBaseUrl = ENV_API_URL && ENV_API_URL.length > 0
     ? ENV_API_URL
     : (__DEV__ ? DEV_FALLBACK_API_URL : PROD_FALLBACK_API_URL);
+
+if (!__DEV__ && !ENV_API_URL) {
+    console.error('[API] EXPO_PUBLIC_API_URL is not set. Falling back to placeholder production URL.');
+}
 
 export const API_BASE_URL = normalizeApiUrl(resolvedBaseUrl);
 
