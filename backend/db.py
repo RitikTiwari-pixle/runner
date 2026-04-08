@@ -13,7 +13,7 @@ load_dotenv()
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql+asyncpg://postgres:postgres@localhost:5432/territory_runner"
+    "postgresql://postgres:BvQDpEUsfJHXwqHBZOuKcWDyPyFdldum@maglev.proxy.rlwy.net:16797/railway"
 )
 
 # Engine configured for async operations
