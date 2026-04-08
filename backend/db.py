@@ -16,6 +16,8 @@ def normalize_database_url(raw_url: str) -> str:
     if url.startswith("postgres://"):
         # Railway-style URL alias
         url = url.replace("postgres://", "postgresql://", 1)
+    if url.startswith("postgresql+psycopg2://"):
+        url = url.replace("postgresql+psycopg2://", "postgresql+asyncpg://", 1)
     if url.startswith("postgresql://") and not url.startswith("postgresql+asyncpg://"):
         # Force async driver for SQLAlchemy async engine
         url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
