@@ -3,7 +3,6 @@
  */
 
 import axios, { AxiosError, AxiosInstance } from 'axios';
-import { NativeModules, Platform } from 'react-native';
 import { GPSPoint, RunSession } from '../types/run';
 import { getToken } from './authService';
 
@@ -12,130 +11,15 @@ function normalizeApiUrl(rawUrl: string): string {
     return trimmed.endsWith('/api') ? trimmed : `${trimmed}/api`;
 }
 
-function extractHost(value?: string | null): string | null {
-    const raw = value?.trim();
-    if (!raw) return null;
+const ENV_API_URL = process.env.EXPO_PUBLIC_API_URL?.trim();
+const DEV_FALLBACK_API_URL = 'http://localhost:8000';
+const PROD_FALLBACK_API_URL = 'https://api.territoryrunner.in';
 
-    const withScheme = /^[a-z]+:\/\//i.test(raw) ? raw : `http://${raw}`;
-    const match = withScheme.match(/^[a-z]+:\/\/([^/:]+)/i);
-    return match?.[1] ?? null;
-}
+const resolvedBaseUrl = ENV_API_URL && ENV_API_URL.length > 0
+    ? ENV_API_URL
+    : (__DEV__ ? DEV_FALLBACK_API_URL : PROD_FALLBACK_API_URL);
 
-function isLoopbackHost(host: string): boolean {
-    return host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0';
-}
-
-function isTunnelHost(host: string): boolean {
-    const lower = host.toLowerCase();
-    return (
-        lower.endsWith('.expo.dev')
-        || lower.endsWith('.exp.direct')
-        || lower.includes('ngrok')
-        || lower.includes('trycloudflare')
-    );
-}
-
-function resolveDevHost(): string | null {
-    const candidates: string[] = [];
-    const addHost = (value?: string | null) => {
-        const host = extractHost(value);
-        if (host && !candidates.includes(host)) {
-            candidates.push(host);
-        }
-    };
-
-    try {
-        if (Platform.OS !== 'web' && NativeModules?.SourceCode?.scriptURL) {
-            addHost(NativeModules.SourceCode.scriptURL);
-        }
-    } catch (e) {
-        // NativeModules may not be available in pure web context
-        console.debug('[API] NativeModules access failed (web context):', e);
-    }
-
-    try {
-        const constants = NativeModules?.DevSettings?.getConstants?.();
-        addHost(constants?.packagerConnectionSettings?.debuggerHost);
-    } catch {
-        // no-op
-    }
-
-    try {
-        // Optional runtime source for Expo Go host details.
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const expoConstants = require('expo-constants').default;
-        addHost(expoConstants?.expoConfig?.hostUri);
-        addHost(expoConstants?.manifest2?.extra?.expoClient?.hostUri);
-        addHost(expoConstants?.manifest?.debuggerHost);
-    } catch {
-        // no-op
-    }
-
-    // Prioritize non-loopback, non-tunnel hosts for LAN connections (physical device on same network)
-    for (const host of candidates) {
-        if (!isLoopbackHost(host) && !isTunnelHost(host)) {
-            console.log('[API] Using LAN host for physical device:', host);
-            return host;
-        }
-    }
-
-    // If no LAN host found, check for tunnel hosts (good for remote dev)
-    const tunnelHost = candidates.find(isTunnelHost);
-    if (tunnelHost) {
-        console.log('[API] Using tunnel host:', tunnelHost);
-        return tunnelHost;
-    }
-
-    // Last resort: any candidate (usually localhost)
-    if (candidates.length > 0) {
-        console.log('[API] Using fallback host:', candidates[0]);
-        return candidates[0];
-    }
-
-    return null;
-}
-
-function inferExpoDevApiUrl(): string {
-    const host = resolveDevHost();
-    if (host && !isLoopbackHost(host) && !isTunnelHost(host)) {
-        return `http://${host}:8000/api`;
-    }
-
-    // Fallback likely for Android emulator.
-    if (Platform.OS === 'android') {
-        return 'http://10.0.2.2:8000/api';
-    }
-    return 'http://localhost:8000/api';
-}
-
-const ENV_API_URL = process.env.EXPO_PUBLIC_API_URL;
-
-// On web, the browser can always reach the backend via localhost directly.
-// If EXPO_PUBLIC_API_URL was set to a LAN IP (e.g. for Expo Go on phone),
-// rewrite it to localhost so the web build doesn't break.
-function resolveWebApiUrl(raw: string): string {
-    try {
-        const url = new URL(raw.trim().replace(/\/+$/, ''));
-        if (!isLoopbackHost(url.hostname)) {
-            return `http://localhost:${url.port || 8000}/api`;
-        }
-    } catch {
-        // fallthrough
-    }
-    return normalizeApiUrl(raw);
-}
-
-// Priority:
-// 1) EXPO_PUBLIC_API_URL  (web: rewritten to localhost if LAN IP)
-// 2) localhost (web fallback)
-// 3) inferred host from Expo bundler URL / emulator fallback (native)
-const DEV_URL = ENV_API_URL
-    ? (Platform.OS === 'web' ? resolveWebApiUrl(ENV_API_URL) : normalizeApiUrl(ENV_API_URL))
-    : (Platform.OS === 'web' ? 'http://localhost:8000/api' : inferExpoDevApiUrl());
-
-// Allow production API URL to be overridden via environment variable
-const PROD_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.territoryrunner.in/api';
-export const API_BASE_URL = __DEV__ ? DEV_URL : normalizeApiUrl(PROD_URL);
+export const API_BASE_URL = normalizeApiUrl(resolvedBaseUrl);
 
 if (__DEV__) {
     // Helps diagnose Expo Go "Network Error" quickly in Metro logs.
@@ -168,7 +52,7 @@ export function getApiErrorMessage(error: unknown, fallback: string): string {
     }
 
     if (err?.message === 'Network Error') {
-        return `Cannot connect to backend (${API_BASE_URL}). If using Expo Go on phone, set EXPO_PUBLIC_API_URL=http://<your-laptop-ip>:8000/api and restart Expo in LAN mode.`;
+        return `Cannot connect to backend (${API_BASE_URL}). Verify EXPO_PUBLIC_API_URL points to your deployed backend URL.`;
     }
 
     if (typeof err?.message === 'string' && err.message.trim()) {
