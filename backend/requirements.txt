@@ -4,8 +4,7 @@ uvicorn[standard]>=0.30.0
 gunicorn>=22.0.0
 python-dotenv>=1.0.1
 pydantic>=2.8.0
-psycopg2
-psycopg2-binary
+
 
 # ─── Database ────────────────────────────
 sqlalchemy[asyncio]>=2.0.32
