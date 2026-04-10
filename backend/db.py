@@ -16,6 +16,11 @@ DATABASE_URL = os.getenv(
     "postgresql://postgres:BvQDpEUsfJHXwqHBZOuKcWDyPyFdldum@maglev.proxy.rlwy.net:16797/railway"
 )
 
+# SQLAlchemy async engine requires the asyncpg dialect in the URL.
+# Convert plain PostgreSQL URLs automatically to avoid startup/runtime failures.
+if DATABASE_URL.startswith("postgresql://") and "+asyncpg" not in DATABASE_URL:
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+
 # Engine configured for async operations
 engine = create_async_engine(
     DATABASE_URL, 
