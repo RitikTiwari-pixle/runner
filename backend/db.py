@@ -17,7 +17,10 @@ DATABASE_URL = os.getenv(
 )
 
 # SQLAlchemy async engine requires the asyncpg dialect in the URL.
-# Convert plain PostgreSQL URLs automatically to avoid startup/runtime failures.
+# Railway/Heroku often provide `postgres://...`, while SQLAlchemy expects `postgresql://...`.
+# Normalize both forms to an async URL to avoid import-time crashes.
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 if DATABASE_URL.startswith("postgresql://") and "+asyncpg" not in DATABASE_URL:
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
