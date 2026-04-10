@@ -16,13 +16,32 @@ DATABASE_URL = os.getenv(
     "postgresql://postgres:BvQDpEUsfJHXwqHBZOuKcWDyPyFdldum@maglev.proxy.rlwy.net:16797/railway"
 )
 
-# SQLAlchemy async engine requires the asyncpg dialect in the URL.
-# Railway/Heroku often provide `postgres://...`, while SQLAlchemy expects `postgresql://...`.
-# Normalize both forms to an async URL to avoid import-time crashes.
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-if DATABASE_URL.startswith("postgresql://") and "+asyncpg" not in DATABASE_URL:
-    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+def _normalize_async_database_url(raw_url: str) -> str:
+    """
+    Force PostgreSQL URLs to use asyncpg for SQLAlchemy async engine.
+
+    Handles common provider URL variants:
+    - postgres://...
+    - postgresql://...
+    - postgresql+psycopg2://...
+    - postgresql+psycopg://...
+    """
+    value = (raw_url or "").strip()
+
+    if value.startswith("postgres://"):
+        value = value.replace("postgres://", "postgresql://", 1)
+
+    if value.startswith("postgresql+psycopg2://"):
+        value = value.replace("postgresql+psycopg2://", "postgresql+asyncpg://", 1)
+    elif value.startswith("postgresql+psycopg://"):
+        value = value.replace("postgresql+psycopg://", "postgresql+asyncpg://", 1)
+    elif value.startswith("postgresql://") and "+asyncpg" not in value:
+        value = value.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+    return value
+
+
+DATABASE_URL = _normalize_async_database_url(DATABASE_URL)
 
 # Engine configured for async operations
 engine = create_async_engine(
