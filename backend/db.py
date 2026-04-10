@@ -8,6 +8,7 @@ from typing import AsyncGenerator
 from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.engine import make_url
 
 load_dotenv()
 
@@ -15,6 +16,41 @@ DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://postgres:BvQDpEUsfJHXwqHBZOuKcWDyPyFdldum@maglev.proxy.rlwy.net:16797/railway"
 )
+
+def _normalize_async_database_url(raw_url: str) -> str:
+    """
+    Force PostgreSQL URLs to use asyncpg for SQLAlchemy async engine.
+
+    Handles common provider URL variants:
+    - postgres://...
+    - postgresql://...
+    - postgresql+psycopg2://...
+    - postgresql+psycopg://...
+    """
+    value = (raw_url or "").strip()
+    if not value:
+        return value
+
+    # Parse with SQLAlchemy URL parser to normalize every postgres variant safely.
+    try:
+        parsed = make_url(value)
+        if parsed.drivername in {"postgres", "postgresql", "postgresql+psycopg2", "postgresql+psycopg"}:
+            parsed = parsed.set(drivername="postgresql+asyncpg")
+        return parsed.render_as_string(hide_password=False)
+    except Exception:
+        # Fallback string normalization for non-standard URLs.
+        if value.startswith("postgres://"):
+            value = value.replace("postgres://", "postgresql://", 1)
+        if value.startswith("postgresql+psycopg2://"):
+            value = value.replace("postgresql+psycopg2://", "postgresql+asyncpg://", 1)
+        elif value.startswith("postgresql+psycopg://"):
+            value = value.replace("postgresql+psycopg://", "postgresql+asyncpg://", 1)
+        elif value.startswith("postgresql://") and "+asyncpg" not in value:
+            value = value.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return value
+
+
+DATABASE_URL = _normalize_async_database_url(DATABASE_URL)
 
 # Engine configured for async operations
 engine = create_async_engine(

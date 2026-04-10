@@ -20,7 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+COPY backend/requirements.txt ./requirements.txt
 # --only-binary shapely prevents source compilation (avoids libgeos-dev + OOM)
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir --only-binary shapely --prefix=/install -r requirements.txt
@@ -38,7 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /install /usr/local
-COPY . .
+COPY backend/ ./
 
 # Non-root user for security
 RUN useradd --create-home appuser && chown -R appuser:appuser /app
