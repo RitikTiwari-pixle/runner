@@ -134,7 +134,7 @@ const DEV_URL = ENV_API_URL
     : (Platform.OS === 'web' ? 'http://localhost:8000/api' : inferExpoDevApiUrl());
 
 // Allow production API URL to be overridden via environment variable
-const PROD_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.territoryrunner.in/api';
+const PROD_URL = process.env.EXPO_PUBLIC_API_URL || 'https://runner-production-02d9.up.railway.app';
 export const API_BASE_URL = __DEV__ ? DEV_URL : normalizeApiUrl(PROD_URL);
 
 if (__DEV__) {
