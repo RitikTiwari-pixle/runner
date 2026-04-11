@@ -1,382 +1,112 @@
 /**
  * Google OAuth Service
- * Handles Google authentication flow for Expo/React Native
- * 
- * Features:
- * - OAuth 2.0 authentication with Google
- * - Token management (revoke)
- * - Type-safe error handling with error codes
- * - Configurable logging with debug mode
- * - Request timeout handling
- * - Platform compatibility checks
+ * Handles Google authentication for Expo/React Native + Web
  */
 
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
 
-// Configure web browser for auth session
 WebBrowser.maybeCompleteAuthSession();
 
 // ============================================================================
-// Constants
-// ============================================================================
-
-/** Default request timeout in milliseconds */
-const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
-
-/** OAuth response type */
-const AUTH_RESPONSE_TYPE = AuthSession.ResponseType.IdToken;
-
-
-/** Default scopes for Google OAuth */
-const DEFAULT_SCOPES = ['openid', 'profile', 'email'] as const;
-
-/**
- * On web, Google requires PKCE Authorization Code flow (implicit is deprecated).
- * On native, we can still use the Implicit IdToken flow.
- */
-function getResponseType(): AuthSession.ResponseType {
-  if (Platform.OS === 'web') {
-    return AuthSession.ResponseType.Code;
-  }
-  return AuthSession.ResponseType.IdToken;
-}
-
-// ============================================================================
-// Error Codes
+// Error Types
 // ============================================================================
 
 export enum GoogleAuthErrorCode {
-  /** OAuth Client ID is not configured */
   CONFIG_ERROR = 'CONFIG_ERROR',
-  /** Invalid ID token format received */
   INVALID_TOKEN = 'INVALID_TOKEN',
-  /** Authentication flow failed */
   AUTH_FAILED = 'AUTH_FAILED',
-  /** Token revocation failed */
   REVOKE_FAILED = 'REVOKE_FAILED',
-  /** Token revocation request error */
   REVOKE_ERROR = 'REVOKE_ERROR',
-  /** Network request timeout */
   TIMEOUT_ERROR = 'TIMEOUT_ERROR',
-  /** Network error occurred */
   NETWORK_ERROR = 'NETWORK_ERROR',
-  /** Unknown/unexpected error */
   UNKNOWN_ERROR = 'UNKNOWN_ERROR',
-  /** Invalid input parameter */
   VALIDATION_ERROR = 'VALIDATION_ERROR',
-  /** Platform not supported */
   PLATFORM_ERROR = 'PLATFORM_ERROR',
 }
 
-// ============================================================================
-// Types and Interfaces
-// ============================================================================
-
-/**
- * Custom error class for Google Auth errors
- */
 export class GoogleAuthError extends Error {
   public readonly code: GoogleAuthErrorCode;
   public readonly originalError?: unknown;
   public readonly timestamp: number;
 
-  constructor(
-    message: string,
-    code: GoogleAuthErrorCode,
-    originalError?: unknown
-  ) {
+  constructor(message: string, code: GoogleAuthErrorCode, originalError?: unknown) {
     super(message);
     this.name = 'GoogleAuthError';
     this.code = code;
     this.originalError = originalError;
     this.timestamp = Date.now();
-
-    // Maintains proper stack trace for where our error was thrown
     if (Error.captureStackTrace) {
       Error.captureStackTrace(this, GoogleAuthError);
     }
   }
-
-  /**
-   * Creates a JSON representation of the error for logging/serialization
-   */
-  toJSON(): Record<string, unknown> {
-    return {
-      name: this.name,
-      message: this.message,
-      code: this.code,
-      timestamp: this.timestamp,
-      stack: this.stack,
-    };
-  }
 }
 
-/**
- * User profile information from Google
- */
+// ============================================================================
+// Types
+// ============================================================================
+
 export interface GoogleUserProfile {
-  /** User's full name */
   name?: string;
-  /** User's given name */
   givenName?: string;
-  /** User's family name */
   familyName?: string;
-  /** User's email address */
   email?: string;
-  /** URL to user's profile picture */
   picture?: string;
-  /** User's locale */
   locale?: string;
-  /** Whether the email is verified */
   emailVerified?: boolean;
 }
 
-/**
- * Result of a successful Google authentication
- */
 export interface GoogleAuthResult {
-  /** The ID token from Google */
   idToken: string;
-  /** Decoded user profile (optional, requires calling decodeIdToken separately) */
   user?: GoogleUserProfile;
 }
 
-/**
- * Result type from OAuth flow
- */
-export type AuthResultType = 'success' | 'dismiss' | 'cancel' | 'error';
-
-/**
- * OAuth discovery document endpoints
- */
-export interface OAuthDiscoveryConfig {
-  authorizationEndpoint: string;
-  tokenEndpoint: string;
-  revocationEndpoint: string;
-}
-
-/**
- * Configuration options for Google OAuth
- */
-export interface GoogleOAuthConfig {
-  clientId: string;
-  redirectUri: string;
-  scopes: readonly string[];
-  discovery: OAuthDiscoveryConfig;
-}
-
-/**
- * Logger interface for dependency injection
- */
-export interface AuthLogger {
-  debug(message: string, ...args: unknown[]): void;
-  info(message: string, ...args: unknown[]): void;
-  warn(message: string, ...args: unknown[]): void;
-  error(message: string, ...args: unknown[]): void;
-}
-
 // ============================================================================
-// Configuration
+// Discovery document
 // ============================================================================
 
-/**
- * Creates the redirect URI for OAuth callbacks.
- *
- * - On **web** (browser): use `http://localhost:8081` — this must be
- *   registered in Google Cloud Console under "Authorized redirect URIs".
- * - On **native** (Expo Go / standalone): use makeRedirectUri() which
- *   generates the appropriate exp:// or custom-scheme URI for the device.
- *
- * ⚠️  If your dev machine IP is not 127.0.0.1, add both variants to
- *     Google Cloud Console → APIs & Services → Credentials → OAuth Client.
- */
+const discovery = {
+  authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+  tokenEndpoint: 'https://oauth2.googleapis.com/token',
+  revocationEndpoint: 'https://oauth2.googleapis.com/revoke',
+};
+
+// ============================================================================
+// Config
+// ============================================================================
+
+function getClientId(): string {
+  const clientId = process.env.EXPO_PUBLIC_GOOGLE_OAUTH_CLIENT_ID || '';
+  return clientId;
+}
+
 function createRedirectUri(): string {
   if (Platform.OS === 'web') {
-    // Browser always resolves relative to its own origin; use a fixed
-    // localhost URI that you can register once in the Console.
-    const origin = (typeof window !== 'undefined' && window?.location?.origin)
-      ? window.location.origin
-      : 'http://localhost:8081';
+    const origin =
+      typeof window !== 'undefined' && window?.location?.origin
+        ? window.location.origin
+        : 'http://localhost:8081';
     return origin;
   }
-  // Native: Expo makeRedirectUri() picks up the correct exp:// or scheme URI.
   return AuthSession.makeRedirectUri();
 }
 
-
-/**
- * Gets the OAuth configuration
- * Lazily initializes redirectUri to support hot reloading
- */
-function getOAuthConfig(): GoogleOAuthConfig {
-  return {
-    clientId: process.env.EXPO_PUBLIC_GOOGLE_OAUTH_CLIENT_ID || '',
-    redirectUri: createRedirectUri(),
-    scopes: DEFAULT_SCOPES,
-    discovery: {
-      authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
-      tokenEndpoint: 'https://oauth2.googleapis.com/token',
-      revocationEndpoint: 'https://oauth2.googleapis.com/revoke',
-    },
-  };
-}
-
-/**
- * Determines if debug mode is enabled
- */
-function isDebugMode(): boolean {
-  // @ts-ignore - __DEV__ is a global defined by React Native/Expo
-  if (typeof __DEV__ !== 'undefined') {
-    // @ts-ignore
-    return __DEV__;
-  }
-  return process.env.NODE_ENV === 'development';
-}
-
 // ============================================================================
-// Logging
+// Helpers
 // ============================================================================
 
-/**
- * Default console-based logger implementation
- */
-function createDefaultLogger(debugEnabled: boolean): AuthLogger {
-  return {
-    debug: (message: string, ...args: unknown[]) => {
-      if (debugEnabled) {
-        console.debug(`[GoogleAuth] ${message}`, ...args);
-      }
-    },
-    info: (message: string, ...args: unknown[]) => {
-      console.info(`[GoogleAuth] ${message}`, ...args);
-    },
-    warn: (message: string, ...args: unknown[]) => {
-      console.warn(`[GoogleAuth] ${message}`, ...args);
-    },
-    error: (message: string, ...args: unknown[]) => {
-      console.error(`[GoogleAuth] ${message}`, ...args);
-    },
-  };
-}
-
-// Initialize logger
-const DEBUG_MODE = isDebugMode();
-const logger = createDefaultLogger(DEBUG_MODE);
-
-/**
- * Custom logger instance (can be overridden for testing or custom logging)
- */
-let customLogger: AuthLogger | null = null;
-
-/**
- * Get the active logger (custom or default)
- */
-function getLogger(): AuthLogger {
-  return customLogger ?? logger;
-}
-
-/**
- * Set a custom logger for the auth service
- * @param logger - Custom logger implementation
- */
-export function setLogger(loggerInstance: AuthLogger): void {
-  customLogger = loggerInstance;
-}
-
-/**
- * Reset to default logger
- */
-export function resetLogger(): void {
-  customLogger = null;
-}
-
-// ============================================================================
-// Validation Helpers
-// ============================================================================
-
-/**
- * Validates that the OAuth configuration is complete
- * @param config - The configuration to validate
- * @throws {GoogleAuthError} If configuration is invalid
- */
-function validateConfig(config: GoogleOAuthConfig): void {
-  if (!config.clientId || config.clientId.trim() === '') {
-    throw new GoogleAuthError(
-      'Google OAuth Client ID is not configured. Set EXPO_PUBLIC_GOOGLE_OAUTH_CLIENT_ID environment variable.',
-      GoogleAuthErrorCode.CONFIG_ERROR
-    );
-  }
-
-  if (!config.redirectUri || config.redirectUri.trim() === '') {
-    throw new GoogleAuthError(
-      'Google OAuth Redirect URI is not configured properly.',
-      GoogleAuthErrorCode.CONFIG_ERROR
-    );
-  }
-}
-
-/**
- * Validates an ID token format (basic JWT structure check)
- * @param token - The token to validate
- * @returns true if the token has a valid JWT structure
- */
 function isValidIdToken(token: string | undefined): token is string {
-  if (typeof token !== 'string' || token.length === 0) {
-    return false;
-  }
-
+  if (typeof token !== 'string' || token.length === 0) return false;
   const parts = token.split('.');
-  return parts.length === 3 && parts.every((part) => part.length > 0);
+  return parts.length === 3 && parts.every((p) => p.length > 0);
 }
 
-// ============================================================================
-// Network Utilities
-// ============================================================================
-
-/**
- * Creates an AbortController with a timeout
- * @param timeoutMs - Timeout in milliseconds
- * @returns Object with AbortController and timeout cleanup function
- */
-function createTimeoutController(timeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS): {
-  controller: AbortController;
-  cleanup: () => void;
-} {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => {
-    controller.abort();
-  }, timeoutMs);
-
-  return {
-    controller,
-    cleanup: () => clearTimeout(timeoutId),
-  };
-}
-
-// ============================================================================
-// JWT Utilities
-// ============================================================================
-
-/**
- * Safely decodes a base64url encoded string
- * @param base64Url - The base64url encoded string
- * @returns The decoded string
- */
 function decodeBase64Url(base64Url: string): string {
-  // Convert base64url to base64
   let base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-
-  // Pad with '=' to make length a multiple of 4
   const pad = base64.length % 4;
-  if (pad) {
-    if (pad === 1) {
-      throw new Error('Invalid base64 string');
-    }
-    base64 += '='.repeat(4 - pad);
-  }
-
+  if (pad === 1) throw new Error('Invalid base64 string');
+  if (pad) base64 += '='.repeat(4 - pad);
   return decodeURIComponent(
     atob(base64)
       .split('')
@@ -385,18 +115,9 @@ function decodeBase64Url(base64Url: string): string {
   );
 }
 
-/**
- * Decodes the payload from a JWT token
- * Note: This does NOT verify the token signature - validation should be done on the backend
- * @param token - The JWT token to decode
- * @returns The decoded payload as a record
- */
 function decodeJWTPayload(token: string): Record<string, unknown> | null {
   try {
-    if (!isValidIdToken(token)) {
-      return null;
-    }
-
+    if (!isValidIdToken(token)) return null;
     const base64Url = token.split('.')[1];
     const jsonPayload = decodeBase64Url(base64Url);
     return JSON.parse(jsonPayload);
@@ -406,53 +127,92 @@ function decodeJWTPayload(token: string): Record<string, unknown> | null {
 }
 
 // ============================================================================
-// Main Auth Functions
+// Main sign-in function
 // ============================================================================
 
-/**
- * Start Google OAuth login flow
- * Returns id_token from Google on success
- * 
- * @throws {GoogleAuthError} If configuration is invalid or auth fails
- * @returns {Promise<GoogleAuthResult | null>} Auth result or null if dismissed
- */
 export async function signInWithGoogle(): Promise<GoogleAuthResult | null> {
-  const log = getLogger();
-  const config = getOAuthConfig();
+  const clientId = getClientId();
+
+  if (!clientId || clientId.trim() === '') {
+    throw new GoogleAuthError(
+      'Google OAuth Client ID is not configured. Set EXPO_PUBLIC_GOOGLE_OAUTH_CLIENT_ID.',
+      GoogleAuthErrorCode.CONFIG_ERROR
+    );
+  }
+
+  const redirectUri = createRedirectUri();
+
+  console.log('[GoogleAuth] Starting OAuth flow');
+  console.log('[GoogleAuth] Platform:', Platform.OS);
+  console.log('[GoogleAuth] Redirect URI:', redirectUri);
+  console.log('[GoogleAuth] Client ID prefix:', clientId.substring(0, 20) + '...');
 
   try {
-    validateConfig(config);
-    log.debug('Starting Google OAuth flow');
+    // FIX: On web, use ResponseType.Token (implicit flow) with nonce.
+    // This returns id_token directly in the URL fragment — no server exchange needed.
+    // ResponseType.Code requires a backend token exchange to get id_token,
+    // which expo-auth-session does NOT do automatically on web.
+    const responseType =
+      Platform.OS === 'web'
+        ? AuthSession.ResponseType.Token
+        : AuthSession.ResponseType.IdToken;
 
     const request = new AuthSession.AuthRequest({
-      clientId: config.clientId,
-      redirectUri: config.redirectUri,
-      responseType: getResponseType(),
-      // Spread to convert readonly string[] → mutable string[]
-      scopes: [...config.scopes],
-      // PKCE is required for web (code flow), ignored on native (implicit flow)
-      usePKCE: Platform.OS === 'web',
+      clientId,
+      redirectUri,
+      responseType,
+      scopes: ['openid', 'profile', 'email'],
+      usePKCE: false, // Must be false for implicit/token flow
+      extraParams:
+        Platform.OS === 'web'
+          ? {
+              // nonce required by Google for openid scope on web implicit flow
+              nonce: Math.random().toString(36).substring(2),
+            }
+          : {},
     });
 
-    const result = await request.promptAsync(config.discovery);
+    const result = await request.promptAsync(discovery);
 
-    return handleAuthResult(result, request);
-  } catch (error) {
-    if (error instanceof GoogleAuthError) {
-      throw error;
+    console.log('[GoogleAuth] Result type:', result.type);
+
+    if (result.type === 'dismiss' || result.type === 'cancel') {
+      console.log('[GoogleAuth] User cancelled or dismissed');
+      return null;
     }
 
-    const networkError = error as { code?: string };
-    if (networkError.code === 'ECONNABORTED') {
-      log.error('Authentication request timeout');
+    if (result.type !== 'success') {
+      console.error('[GoogleAuth] Auth failed:', result);
+      throw new GoogleAuthError('Authentication failed', GoogleAuthErrorCode.AUTH_FAILED, result);
+    }
+
+    const params = result.params as Record<string, string | undefined>;
+
+    // On web (token flow): id_token comes in params directly
+    // On native (idToken flow): id_token also comes in params
+    const rawToken: string | undefined =
+      params['id_token'] ||
+      (result as any)?.authentication?.idToken;
+
+    console.log('[GoogleAuth] Token received:', rawToken ? `${rawToken.length} chars` : 'NONE');
+    console.log('[GoogleAuth] Param keys:', Object.keys(params));
+
+    if (!isValidIdToken(rawToken)) {
+      console.error('[GoogleAuth] Invalid or missing token', {
+        tokenLength: rawToken?.length ?? 0,
+        paramKeys: Object.keys(params),
+      });
       throw new GoogleAuthError(
-        'Authentication request timed out. Please try again.',
-        GoogleAuthErrorCode.TIMEOUT_ERROR,
-        error
+        'Invalid ID token received from Google',
+        GoogleAuthErrorCode.INVALID_TOKEN
       );
     }
 
-    log.error('Unexpected error during sign in', error);
+    console.log('[GoogleAuth] Login successful');
+    return { idToken: rawToken };
+  } catch (error) {
+    if (error instanceof GoogleAuthError) throw error;
+    console.error('[GoogleAuth] Unexpected error:', error);
     throw new GoogleAuthError(
       'An unexpected error occurred during Google authentication',
       GoogleAuthErrorCode.UNKNOWN_ERROR,
@@ -461,181 +221,63 @@ export async function signInWithGoogle(): Promise<GoogleAuthResult | null> {
   }
 }
 
-/**
- * Handles the OAuth result and returns appropriate response
- * @param result - The result from the OAuth flow
- * @returns GoogleAuthResult on success, null on dismiss/cancel
- * @throws {GoogleAuthError} On authentication failure
- */
-function handleAuthResult(
-  result: AuthSession.AuthSessionResult,
-  request?: AuthSession.AuthRequest | null
-): GoogleAuthResult | null {
-  const log = getLogger();
+// ============================================================================
+// Sign out
+// ============================================================================
 
-  switch (result.type) {
-    case 'success': {
-      const params = result.params as Record<string, string | undefined>;
-
-      // ── Web (PKCE Code flow): extract id_token from the code response ──
-      // The AuthRequest.promptAsync() handles the token exchange automatically
-      // when usePKCE=true; the id_token appears in params directly.
-      const rawToken: string | undefined =
-        params['id_token'] ||
-        (result as any)?.authentication?.idToken ||
-        params['access_token'];  // fallback: send access_token if no id_token
-
-      if (isValidIdToken(rawToken)) {
-        log.info('Login successful');
-        return { idToken: rawToken };
-      }
-
-      // On web code flow, id_token might not be in params if the token
-      // endpoint wasn't called. Log what we got for debugging.
-      log.error('Invalid or missing ID token', {
-        tokenLength: (rawToken as string | undefined)?.length ?? 0,
-        paramKeys: Object.keys(params),
-        hasAuthentication: !!(result as any)?.authentication,
-      });
-      throw new GoogleAuthError(
-        'Invalid ID token received from Google',
-        GoogleAuthErrorCode.INVALID_TOKEN
-      );
-    }
-
-    case 'dismiss':
-      log.debug('User dismissed login');
-      return null;
-
-    case 'cancel':
-      log.debug('Login cancelled');
-      return null;
-
-    default:
-      log.error('Login failed with result', { type: result.type });
-      throw new GoogleAuthError(
-        'Authentication failed',
-        GoogleAuthErrorCode.AUTH_FAILED,
-        result
-      );
-  }
-}
-
-/**
- * Sign out from Google and revoke the token if provided
- * 
- * @param idToken - Optional ID token to revoke on Google's servers
- * @returns true if token was successfully revoked, false otherwise
- */
 export async function signOutFromGoogle(idToken?: string): Promise<boolean> {
-  const log = getLogger();
-  log.info('Signing out');
-
-  if (!idToken) {
-    log.debug('No token provided for revocation, performing local sign out only');
-    return true;
-  }
-
+  if (!idToken) return true;
   try {
     await revokeToken(idToken);
     return true;
   } catch (error) {
-    // Log but don't throw - sign out should not fail the app
-    log.error('Error during token revocation in sign out', error);
+    console.error('[GoogleAuth] Error during token revocation', error);
     return false;
   }
 }
 
-/**
- * Revoke a Google OAuth token
- * This invalidates the token on Google's servers
- * 
- * @param token - The token to revoke (ID token)
- * @throws {GoogleAuthError} If revocation fails or token is invalid
- */
 export async function revokeToken(token: string): Promise<void> {
-  const log = getLogger();
-  
-  // Validate token is not empty
   if (!token || token.trim() === '') {
-    throw new GoogleAuthError(
-      'Token is required and cannot be empty',
-      GoogleAuthErrorCode.VALIDATION_ERROR
-    );
+    throw new GoogleAuthError('Token is required', GoogleAuthErrorCode.VALIDATION_ERROR);
   }
 
-  log.debug('Revoking token');
-
-  const config = getOAuthConfig();
-  const { controller, cleanup } = createTimeoutController();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
 
   try {
-    const response = await fetch(config.discovery.revocationEndpoint, {
+    const response = await fetch(discovery.revocationEndpoint, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: `token=${encodeURIComponent(token)}`,
       signal: controller.signal,
     });
 
-    cleanup();
+    clearTimeout(timeoutId);
 
-    if (!response.ok) {
-      // 400 Bad Request is returned if the token has already been revoked
-      if (response.status === 400) {
-        log.debug('Token was already revoked or invalid');
-        return;
-      }
-
+    if (!response.ok && response.status !== 400) {
       throw new GoogleAuthError(
         `Token revocation failed with status ${response.status}`,
         GoogleAuthErrorCode.REVOKE_FAILED
       );
     }
-
-    log.info('Token successfully revoked');
   } catch (error) {
-    cleanup();
-
-    if (error instanceof GoogleAuthError) {
-      throw error;
+    clearTimeout(timeoutId);
+    if (error instanceof GoogleAuthError) throw error;
+    if ((error as any).name === 'AbortError') {
+      throw new GoogleAuthError('Token revocation timed out', GoogleAuthErrorCode.TIMEOUT_ERROR, error);
     }
-
-    if ((error as { name?: string }).name === 'AbortError') {
-      log.error('Token revocation request timeout');
-      throw new GoogleAuthError(
-        'Token revocation request timed out',
-        GoogleAuthErrorCode.TIMEOUT_ERROR,
-        error
-      );
-    }
-
-    log.error('Error revoking token', error);
-    throw new GoogleAuthError(
-      'Failed to revoke token',
-      GoogleAuthErrorCode.REVOKE_ERROR,
-      error
-    );
+    throw new GoogleAuthError('Failed to revoke token', GoogleAuthErrorCode.REVOKE_ERROR, error);
   }
 }
 
-/**
- * Decode a JWT token to extract payload information
- * Note: This does NOT verify the token signature - validation should be done on the backend
- * 
- * @param token - The JWT token to decode
- * @returns The decoded user profile or null if invalid
- */
-export function decodeIdToken(token: string): GoogleUserProfile | null {
-  const log = getLogger();
+// ============================================================================
+// Utilities
+// ============================================================================
 
+export function decodeIdToken(token: string): GoogleUserProfile | null {
   try {
     const payload = decodeJWTPayload(token);
-    if (!payload) {
-      return null;
-    }
-
+    if (!payload) return null;
     return {
       name: payload.name as string | undefined,
       givenName: payload.given_name as string | undefined,
@@ -645,39 +287,16 @@ export function decodeIdToken(token: string): GoogleUserProfile | null {
       locale: payload.locale as string | undefined,
       emailVerified: payload.email_verified as boolean | undefined,
     };
-  } catch (error) {
-    log.error('Failed to decode ID token', error);
+  } catch {
     return null;
   }
 }
 
-/**
- * Check if the current platform supports Google OAuth
- */
 export function isGoogleOAuthSupported(): boolean {
-  // Google OAuth via expo-auth-session works on iOS, Android, and modern web browsers.
-  // Only native requires additional setup (scheme redirect); web uses redirect_uri.
   return Platform.OS === 'ios' || Platform.OS === 'android' || Platform.OS === 'web';
 }
 
-/**
- * Get the current OAuth configuration (useful for debugging)
- * Note: This creates a new config object each time with fresh redirectUri
- */
-export function getOAuthConfigExport(): Readonly<GoogleOAuthConfig> {
-  return Object.freeze(getOAuthConfig());
-}
-
-/**
- * Validates if the auth service is properly configured and ready to use
- * @returns true if configured correctly
- */
 export function isConfigured(): boolean {
-  try {
-    const config = getOAuthConfig();
-    validateConfig(config);
-    return true;
-  } catch {
-    return false;
-  }
+  const clientId = getClientId();
+  return !!(clientId && clientId.trim() !== '');
 }
