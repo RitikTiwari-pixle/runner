@@ -98,6 +98,14 @@ async def root():
     return {
         "message": "Welcome to the Territory Runner API! Go to /docs for the interactive API documentation."
     }
+@app.get("/api")
+async def api_root():
+    return {
+        "message": "Territory Runner API is running",
+        "docs": "/docs",
+        "health": "/health",
+        "auth_register": "/api/auth/local/register",
+    }
 
 
 @app.get("/health")
