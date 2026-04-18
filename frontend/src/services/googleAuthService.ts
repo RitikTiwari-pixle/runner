@@ -77,8 +77,7 @@ const discovery = {
 // ============================================================================
 
 function getClientId(): string {
-  const clientId = process.env.EXPO_PUBLIC_GOOGLE_OAUTH_CLIENT_ID || '';
-  return clientId;
+  return process.env.EXPO_PUBLIC_GOOGLE_OAUTH_CLIENT_ID || '';
 }
 
 function createRedirectUri(): string {
@@ -148,26 +147,21 @@ export async function signInWithGoogle(): Promise<GoogleAuthResult | null> {
   console.log('[GoogleAuth] Client ID prefix:', clientId.substring(0, 20) + '...');
 
   try {
-    // FIX: On web, use ResponseType.Token (implicit flow) with nonce.
-    // This returns id_token directly in the URL fragment — no server exchange needed.
-    // ResponseType.Code requires a backend token exchange to get id_token,
-    // which expo-auth-session does NOT do automatically on web.
-    const responseType =
-      Platform.OS === 'web'
-        ? AuthSession.ResponseType.Token
-        : AuthSession.ResponseType.IdToken;
+    // IMPORTANT FIX:
+    // Use IdToken flow on web + native. This is compatible with nonce for OpenID.
+    const responseType = AuthSession.ResponseType.IdToken;
 
     const request = new AuthSession.AuthRequest({
       clientId,
       redirectUri,
       responseType,
       scopes: ['openid', 'profile', 'email'],
-      usePKCE: false, // Must be false for implicit/token flow
+      usePKCE: false,
       extraParams:
         Platform.OS === 'web'
           ? {
-              // nonce required by Google for openid scope on web implicit flow
               nonce: Math.random().toString(36).substring(2),
+              prompt: 'select_account',
             }
           : {},
     });
@@ -188,11 +182,7 @@ export async function signInWithGoogle(): Promise<GoogleAuthResult | null> {
 
     const params = result.params as Record<string, string | undefined>;
 
-    // On web (token flow): id_token comes in params directly
-    // On native (idToken flow): id_token also comes in params
-    const rawToken: string | undefined =
-      params['id_token'] ||
-      (result as any)?.authentication?.idToken;
+    const rawToken: string | undefined = params['id_token'] || (result as any)?.authentication?.idToken;
 
     console.log('[GoogleAuth] Token received:', rawToken ? `${rawToken.length} chars` : 'NONE');
     console.log('[GoogleAuth] Param keys:', Object.keys(params));
@@ -264,7 +254,11 @@ export async function revokeToken(token: string): Promise<void> {
     clearTimeout(timeoutId);
     if (error instanceof GoogleAuthError) throw error;
     if ((error as any).name === 'AbortError') {
-      throw new GoogleAuthError('Token revocation timed out', GoogleAuthErrorCode.TIMEOUT_ERROR, error);
+      throw new GoogleAuthError(
+        'Token revocation timed out',
+        GoogleAuthErrorCode.TIMEOUT_ERROR,
+        error
+      );
     }
     throw new GoogleAuthError('Failed to revoke token', GoogleAuthErrorCode.REVOKE_ERROR, error);
   }
