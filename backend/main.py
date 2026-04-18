@@ -74,12 +74,22 @@ _raw_origins = os.getenv("CORS_ORIGINS", "")
 if _raw_origins.strip():
     _allowed_origins: list[str] = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 else:
-    _allowed_origins = ["*"]
+    _allowed_origins = [
+        "https://runner-rouge.vercel.app",
+        "https://www.runner-rouge.vercel.app",
+        "http://localhost:8081",
+        "http://localhost:3000",
+    ]
+
+# Allows Vercel preview deployments like:
+# https://runner-git-master-ritiktiwari-pixles-projects.vercel.app
+_preview_regex = r"^https://runner-.*\.vercel\.app$"
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_allowed_origins,
-    allow_credentials=("*" not in _allowed_origins),
+    allow_origins=_allowed_origins,          # fixed known origins
+    allow_origin_regex=_preview_regex,       # dynamic preview origins
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["*"],
